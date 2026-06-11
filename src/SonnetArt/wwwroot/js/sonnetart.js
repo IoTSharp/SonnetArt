@@ -1,54 +1,3 @@
-async function tryLocalImageDownload(url, fileName) {
-  if (!url) {
-    return null;
-  }
-
-  const payload = { fileName: fileName || 'image.png' };
-  if (url.startsWith('data:')) {
-    payload.dataUrl = url;
-  } else {
-    payload.url = url;
-  }
-
-  try {
-    const response = await fetch('/api/local/download-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (response.status === 404) {
-      return null;
-    }
-
-    const contentType = response.headers.get('content-type') || '';
-    if (!response.ok) {
-      if (contentType.includes('application/json')) {
-        const error = await response.json().catch(() => null);
-        throw new Error(error && error.message ? error.message : '保存图片失败。');
-      }
-
-      const message = await response.text().catch(() => '');
-      throw new Error(message || '保存图片失败。');
-    }
-
-    if (!contentType.includes('application/json')) {
-      return null;
-    }
-
-    const result = await response.json().catch(() => null);
-    return result && result.fileName
-      ? { savedLocally: true, filePath: result.filePath || '', fileName: result.fileName || payload.fileName }
-      : null;
-  } catch (error) {
-    if (error instanceof TypeError) {
-      return null;
-    }
-
-    throw error;
-  }
-}
-
 async function createDownloadHref(url) {
   if (!url) {
     throw new Error('没有可下载的图片地址。');
@@ -120,42 +69,6 @@ function downloadBytes(base64, fileName, contentType) {
   setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 
   return { savedLocally: false, fileName: anchor.download };
-}
-
-async function revealLocalFile(filePath) {
-  if (!filePath) {
-    throw new Error('没有可打开的文件路径。');
-  }
-
-  let response;
-  try {
-    response = await fetch('/api/local/reveal-file', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filePath }),
-    });
-  } catch (error) {
-    if (error instanceof TypeError) {
-      throw new Error('当前运行环境不支持打开本地文件夹。');
-    }
-
-    throw error;
-  }
-
-  if (response.status === 404) {
-    throw new Error('当前运行环境不支持打开本地文件夹。');
-  }
-
-  if (!response.ok) {
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      const error = await response.json().catch(() => null);
-      throw new Error(error && error.message ? error.message : '打开文件位置失败。');
-    }
-
-    const message = await response.text().catch(() => '');
-    throw new Error(message || '打开文件位置失败。');
-  }
 }
 
 const systemThemeWatchers = new Map();
@@ -392,7 +305,7 @@ function exportPreviewMask(canvas) {
   return output.toDataURL('image/png');
 }
 
-window.imageStudio = {
+window.sonnetArt = {
   prefersDarkTheme: function () {
     return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
   },
@@ -432,8 +345,52 @@ window.imageStudio = {
   },
   setDocumentTheme: function (theme) {
     const effectiveTheme = theme === 'dark' ? 'dark' : 'light';
-    document.documentElement.dataset.cosmosTheme = effectiveTheme;
+    document.documentElement.dataset.sonnetartTheme = effectiveTheme;
     document.documentElement.style.colorScheme = effectiveTheme;
+  },
+  clearLaunchCredentials: function () {
+    const url = new URL(window.location.href);
+    let changed = false;
+    for (const key of ['token', 'user_id']) {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      const next = `${url.pathname}${url.search}${url.hash}`;
+      window.history.replaceState(window.history.state, document.title, next || '/');
+    }
+  },
+  applySiteBranding: function (branding) {
+    if (!branding) {
+      return;
+    }
+
+    if (branding.title) {
+      document.title = branding.title;
+    }
+
+    if (branding.description) {
+      let meta = document.querySelector('meta[name="description"]');
+      if (!meta) {
+        meta = document.createElement('meta');
+        meta.setAttribute('name', 'description');
+        document.head.appendChild(meta);
+      }
+
+      meta.setAttribute('content', branding.description);
+    }
+
+    if (branding.iconUrl) {
+      for (const selector of ['link[rel="icon"]', 'link[rel="alternate icon"]']) {
+        const link = document.querySelector(selector);
+        if (link) {
+          link.setAttribute('href', branding.iconUrl);
+        }
+      }
+    }
   },
   window: {
     invoke: async function (command) {
@@ -455,18 +412,10 @@ window.imageStudio = {
     },
   },
   download: async function (url, fileName) {
-    const localResult = await tryLocalImageDownload(url, fileName);
-    if (localResult) {
-      return localResult;
-    }
-
     return await downloadWithAnchor(url, fileName);
   },
   downloadBytes: function (base64, fileName, contentType) {
     return downloadBytes(base64, fileName, contentType);
-  },
-  revealFile: async function (filePath) {
-    await revealLocalFile(filePath);
   },
   copyText: async function (text) {
     if (navigator.clipboard && window.isSecureContext) {

@@ -1,6 +1,6 @@
-using SonnetArt.ImageStudio.Models;
+using SonnetArt.Models;
 
-namespace SonnetArt.ImageStudio.Services;
+namespace SonnetArt.Services;
 
 public static class ImageModelCatalog
 {

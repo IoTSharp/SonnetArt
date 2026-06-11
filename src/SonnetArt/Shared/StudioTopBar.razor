@@ -2,12 +2,19 @@
 
 <header class="studio-topbar" native-web-drag>
     <div class="studio-brand">
-        <div class="studio-logo" aria-hidden="true">
-            <span class="studio-logo-orbit studio-logo-orbit-one"></span>
-            <span class="studio-logo-orbit studio-logo-orbit-two"></span>
-            <span class="studio-logo-core"></span>
-            <span class="studio-logo-spark"></span>
-        </div>
+        @if (!string.IsNullOrWhiteSpace(IconUrl))
+        {
+            <img class="studio-logo-image" src="@IconUrl" alt="" />
+        }
+        else
+        {
+            <div class="studio-logo" aria-hidden="true">
+                <span class="studio-logo-orbit studio-logo-orbit-one"></span>
+                <span class="studio-logo-orbit studio-logo-orbit-two"></span>
+                <span class="studio-logo-core"></span>
+                <span class="studio-logo-spark"></span>
+            </div>
+        }
         <div>
             <h1>@Title</h1>
             <p>@Subtitle</p>
@@ -31,8 +38,9 @@
 </header>
 
 @code {
-    [Parameter] public string Title { get; set; } = "Cosmos";
+    [Parameter] public string Title { get; set; } = "SonnetArt";
     [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public string? IconUrl { get; set; }
     [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
@@ -51,7 +59,7 @@
     {
         try
         {
-            await JsRuntime.InvokeAsync<bool>("imageStudio.window.invoke", command);
+            await JsRuntime.InvokeAsync<bool>("sonnetArt.window.invoke", command);
         }
         catch (JSException)
         {

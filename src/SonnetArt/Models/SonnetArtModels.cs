@@ -1,16 +1,15 @@
 using System.Text.Json.Serialization;
 
-namespace SonnetArt.ImageStudio.Models;
+namespace SonnetArt.Models;
 
 public sealed class StudioSettings
 {
-    public const string DefaultBaseUrl = "https://sonnet.vip/";
+    public const string DefaultBaseUrl = "/";
 
     private string? _legacyBaseUrl;
     private string? _legacyImageApiKey;
 
     public string BaseUrl { get; set; } = DefaultBaseUrl;
-    public string SonnetProxyUrl { get; set; } = string.Empty;
     public string ImageApiKey { get; set; } = string.Empty;
 
     [JsonPropertyName("apiKey")]
@@ -34,13 +33,18 @@ public sealed class StudioSettings
     public long? SonnetApiKeyId { get; set; }
     public string SonnetApiKeyName { get; set; } = "SonnetArt Image";
     public long? SonnetGroupId { get; set; }
-    public string SonnetGroupName { get; set; } = "Cosmos";
+    public string SonnetGroupName { get; set; } = "SonnetArt Image";
     public string OpenAiApiKey { get; set; } = string.Empty;
     public long? SonnetOpenAiApiKeyId { get; set; }
     public string SonnetOpenAiApiKeyName { get; set; } = "SonnetArt OpenAI";
     public long? SonnetOpenAiGroupId { get; set; }
     public string SonnetOpenAiGroupName { get; set; } = "OpenAi";
     public string SonnetPaymentType { get; set; } = "alipay";
+    public long? EmbeddedUserId { get; set; }
+    public string EmbeddedUiMode { get; set; } = string.Empty;
+    public string EmbeddedLanguage { get; set; } = string.Empty;
+    public string EmbeddedSourceHost { get; set; } = string.Empty;
+    public string EmbeddedSourceUrl { get; set; } = string.Empty;
     public string ThemeMode { get; set; } = "system";
     public string ChatModel { get; set; } = "gpt-5.5";
     public string PromptPolishMode { get; set; } = "direct";
@@ -68,18 +72,13 @@ public sealed class StudioSettings
             ImageApiKey = _legacyImageApiKey.Trim();
         }
 
-        if (ShouldUseLegacyBaseUrl(_legacyBaseUrl))
-        {
-            BaseUrl = _legacyBaseUrl!.Trim();
-        }
+        BaseUrl = DefaultBaseUrl;
 
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            BaseUrl = DefaultBaseUrl;
-        }
-
-        SonnetProxyUrl = SonnetProxyUrl.Trim();
         ThemeMode = NormalizeThemeMode(ThemeMode);
+        EmbeddedUiMode = NormalizeEmbeddedUiMode(EmbeddedUiMode);
+        EmbeddedLanguage = NormalizeEmbeddedLanguage(EmbeddedLanguage);
+        EmbeddedSourceHost = EmbeddedSourceHost?.Trim() ?? string.Empty;
+        EmbeddedSourceUrl = EmbeddedSourceUrl?.Trim() ?? string.Empty;
         PromptPolishMode = NormalizePromptPolishMode(PromptPolishMode);
         AspectRatio = NormalizeAspectRatio(AspectRatio);
         ResolutionTier = NormalizeResolutionTier(ResolutionTier);
@@ -96,6 +95,28 @@ public sealed class StudioSettings
             "dark" => "dark",
             _ => "system",
         };
+    }
+
+    public static string NormalizeEmbeddedUiMode(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "embedded" => "embedded",
+            _ => string.Empty,
+        };
+    }
+
+    public static string NormalizeEmbeddedLanguage(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        return normalized.StartsWith("en", StringComparison.OrdinalIgnoreCase)
+            ? "en"
+            : "zh";
     }
 
     public static string NormalizePromptPolishMode(string? value)
@@ -136,13 +157,6 @@ public sealed class StudioSettings
         };
     }
 
-    private bool ShouldUseLegacyBaseUrl(string? value)
-    {
-        return !string.IsNullOrWhiteSpace(value) &&
-            (string.IsNullOrWhiteSpace(BaseUrl) ||
-            string.Equals(BaseUrl.Trim(), DefaultBaseUrl, StringComparison.OrdinalIgnoreCase)) &&
-            !string.Equals(value.Trim(), DefaultBaseUrl, StringComparison.OrdinalIgnoreCase);
-    }
 }
 
 public sealed class StudioSession

@@ -1,0 +1,28 @@
+{$SONNET_ART_PUBLIC_ORIGIN} {
+	encode zstd gzip
+	root * /srv
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	handle_path /api/sonnet/* {
+		rewrite * /api/v1{path}
+		header_up Host {upstream_hostport}
+		header_up X-Forwarded-Host {host}
+		header_down X-SonnetArt-Proxy "1"
+		reverse_proxy {$SONNET_ART_ACCOUNT_UPSTREAM_URL}
+	}
+
+	handle_path /api/openai/* {
+		header_up Host {upstream_hostport}
+		header_up X-Forwarded-Host {host}
+		header_down X-SonnetArt-Proxy "1"
+		reverse_proxy {$SONNET_ART_AI_UPSTREAM_URL}
+	}
+
+	file_server
+
+	try_files {path} /index.html
+}

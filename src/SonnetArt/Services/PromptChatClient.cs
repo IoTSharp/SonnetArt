@@ -4,17 +4,14 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using SonnetArt.ImageStudio.Models;
+using SonnetArt.Models;
 
-namespace SonnetArt.ImageStudio.Services;
+namespace SonnetArt.Services;
 
 public sealed class PromptChatClient
 {
     private const string LocalProxyRoot = "/api/openai/";
     private const string LocalProxyHeader = "X-SonnetArt-Proxy";
-    private const string UpstreamBaseHeader = "X-SonnetArt-Upstream";
-    private const string HttpProxyHeader = "X-SonnetArt-Http-Proxy";
-    private const string DefaultBaseUrl = "https://sonnet.vip/";
     private const string DefaultModel = "gpt-5.5";
     private const int MaxTransientChatAttempts = 3;
 
@@ -112,42 +109,34 @@ public sealed class PromptChatClient
             throw new InvalidOperationException("账户尚未准备好会话能力，请重新登录。");
         }
 
-        var endpoint = BuildEndpoint(settings.BaseUrl, "v1/chat/completions");
+        const string endpointPath = "v1/chat/completions";
         try
         {
             return await SendChatWithTransientRetryAsync(
                 settings,
-                endpoint,
+                endpointPath,
                 messages,
                 temperature,
-                useLocalProxy: true,
                 cancellationToken);
         }
         catch (PromptChatProxyUnavailableException)
         {
-            return await SendChatWithTransientRetryAsync(
-                settings,
-                endpoint,
-                messages,
-                temperature,
-                useLocalProxy: false,
-                cancellationToken);
+            throw new HttpRequestException("会话代理不可用，请检查 SonnetArt 服务配置。");
         }
     }
 
     private async Task<string> SendChatWithTransientRetryAsync(
         StudioSettings settings,
-        Uri endpoint,
+        string endpointPath,
         IReadOnlyList<ChatMessage> messages,
         double temperature,
-        bool useLocalProxy,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; attempt <= MaxTransientChatAttempts; attempt++)
         {
             try
             {
-                return await SendChatOnceAsync(settings, endpoint, messages, temperature, useLocalProxy, cancellationToken);
+                return await SendChatOnceAsync(settings, endpointPath, messages, temperature, cancellationToken);
             }
             catch (HttpRequestException ex) when (!cancellationToken.IsCancellationRequested &&
                 IsTransientChatStatusCode(ex.StatusCode) &&
@@ -162,15 +151,14 @@ public sealed class PromptChatClient
 
     private async Task<string> SendChatOnceAsync(
         StudioSettings settings,
-        Uri upstreamEndpoint,
+        string endpointPath,
         IReadOnlyList<ChatMessage> messages,
         double temperature,
-        bool useLocalProxy,
         CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
-            useLocalProxy ? BuildLocalProxyEndpoint(upstreamEndpoint) : upstreamEndpoint)
+            BuildLocalProxyEndpoint(endpointPath))
         {
             Content = JsonContent.Create(new ChatCompletionRequest(
                 string.IsNullOrWhiteSpace(settings.ChatModel) ? DefaultModel : settings.ChatModel.Trim(),
@@ -179,18 +167,10 @@ public sealed class PromptChatClient
         };
 
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.OpenAiApiKey.Trim());
-        if (useLocalProxy)
-        {
-            request.Headers.TryAddWithoutValidation(UpstreamBaseHeader, BuildProxyUpstreamRoot(upstreamEndpoint));
-            if (!string.IsNullOrWhiteSpace(settings.SonnetProxyUrl))
-            {
-                request.Headers.TryAddWithoutValidation(HttpProxyHeader, settings.SonnetProxyUrl.Trim());
-            }
-        }
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         var raw = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (useLocalProxy && !response.Headers.Contains(LocalProxyHeader))
+        if (!response.Headers.Contains(LocalProxyHeader))
         {
             throw new PromptChatProxyUnavailableException();
         }
@@ -216,26 +196,9 @@ public sealed class PromptChatClient
             HttpStatusCode.GatewayTimeout;
     }
 
-    private static Uri BuildLocalProxyEndpoint(Uri upstreamEndpoint)
+    private static Uri BuildLocalProxyEndpoint(string endpointPath)
     {
-        var path = upstreamEndpoint.AbsolutePath.TrimStart('/');
-        return new Uri(LocalProxyRoot + path + upstreamEndpoint.Query, UriKind.Relative);
-    }
-
-    private static string BuildProxyUpstreamRoot(Uri upstreamEndpoint)
-    {
-        return upstreamEndpoint.GetLeftPart(UriPartial.Authority) + "/";
-    }
-
-    private static Uri BuildEndpoint(string baseUrl, string path)
-    {
-        var root = string.IsNullOrWhiteSpace(baseUrl) ? DefaultBaseUrl : baseUrl.Trim();
-        if (!root.EndsWith('/'))
-        {
-            root += "/";
-        }
-
-        return new Uri(new Uri(root, UriKind.Absolute), path);
+        return new Uri(LocalProxyRoot + endpointPath.TrimStart('/'), UriKind.Relative);
     }
 
     private static string ExtractJson(string value)

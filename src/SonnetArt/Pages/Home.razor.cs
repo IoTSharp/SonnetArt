@@ -1,8 +1,8 @@
 using AntDesign;
 using AntDesign.X;
 using AntDesign.X.Components;
-using SonnetArt.ImageStudio.Models;
-using SonnetArt.ImageStudio.Services;
+using SonnetArt.Models;
+using SonnetArt.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
 using System.Diagnostics;
@@ -12,11 +12,10 @@ using Microsoft.JSInterop;
 using QRCoder;
 using System.Reflection;
 
-namespace SonnetArt.ImageStudio.Pages;
+namespace SonnetArt.Pages;
 
 public partial class Home
 {
-    private const string AppName = "SonnetArt";
     private static readonly string AppVersion = FormatAppVersion(
         typeof(Home).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? typeof(Home).Assembly.GetName().Version?.ToString(3)
@@ -41,27 +40,27 @@ public partial class Home
 
     private static readonly XThemeTokens LightTokens = new()
     {
-        PrimaryColor = "#007f73",
+        PrimaryColor = "#0f8fff",
         BorderRadius = "8px",
-        ColorBgChat = "#f5f7fb",
-        ColorBgBubbleUser = "#0f766e",
-        ColorBgBubbleAi = "#ffffff",
+        ColorBgChat = "#f8fbff",
+        ColorBgBubbleUser = "#1557d7",
+        ColorBgBubbleAi = "rgba(255, 255, 255, 0.9)",
         ColorTextBubbleUser = "#ffffff",
-        ColorTextBubbleAi = "#172033",
-        ColorBorderBubble = "#dbe4ef",
+        ColorTextBubbleAi = "#132137",
+        ColorBorderBubble = "rgba(95, 115, 145, 0.2)",
         FontFamily = "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
     };
 
     private static readonly XThemeTokens DarkTokens = new()
     {
-        PrimaryColor = "#2dd4bf",
+        PrimaryColor = "#4fb6ff",
         BorderRadius = "8px",
-        ColorBgChat = "#101827",
-        ColorBgBubbleUser = "#0f766e",
-        ColorBgBubbleAi = "#172033",
+        ColorBgChat = "#08101d",
+        ColorBgBubbleUser = "#1557d7",
+        ColorBgBubbleAi = "rgba(20, 31, 50, 0.9)",
         ColorTextBubbleUser = "#ecfeff",
-        ColorTextBubbleAi = "#e5edf7",
-        ColorBorderBubble = "#2b3a4e",
+        ColorTextBubbleAi = "#edf5ff",
+        ColorBorderBubble = "rgba(159, 181, 215, 0.16)",
         FontFamily = "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
     };
 
@@ -154,11 +153,8 @@ public partial class Home
     private string _workspaceCreateName = string.Empty;
     private bool _sonnetBusy;
     private bool _sonnetRegisterOpen;
-    private bool _authProxyOpen;
     private string? _error;
     private string? _downloadNotice;
-    private string? _lastDownloadFilePath;
-    private bool _revealDownloadBusy;
     private string? _lastRawJson;
     private string _sonnetEmail = string.Empty;
     private string _sonnetPassword = string.Empty;
@@ -185,6 +181,8 @@ public partial class Home
     private string? _systemThemeWatchId;
     private string? _lastDocumentTheme;
     private bool _systemPrefersDark;
+    private SiteBranding _branding = SiteBranding.Default;
+    private EmbeddedLaunchContext _launchContext = new();
     private bool _serverOnline;
     private bool _serverStatusChecked;
     private DateTimeOffset? _serverStatusCheckedAt;
@@ -218,7 +216,7 @@ public partial class Home
     private bool AccountReady => SonnetLoggedIn &&
         !string.IsNullOrWhiteSpace(Settings.ImageApiKey) &&
         !string.IsNullOrWhiteSpace(Settings.OpenAiApiKey);
-    private bool RequiresAuthOverlay => !AccountReady;
+    private bool RequiresAuthOverlay => !AccountReady && !_sonnetBusy;
     private string EffectiveTheme => Settings.ThemeMode == "dark" || (Settings.ThemeMode == "system" && _systemPrefersDark)
         ? "dark"
         : "light";
@@ -227,7 +225,12 @@ public partial class Home
     private string RootThemeClass => $"studio-provider theme-{EffectiveTheme}";
     private string AccountEmail => string.IsNullOrWhiteSpace(Settings.SonnetUser?.Email) ? "未登录" : Settings.SonnetUser.Email;
     private string BalanceLabel => Settings.SonnetUser is null ? "--" : FormatMoney(Settings.SonnetUser.Balance);
-    private string HeaderSubtitle => AppVersion;
+    private string SiteTitle => _branding.Name;
+    private string SiteDescription => _branding.Description;
+    private string? SiteIconUrl => _branding.IconUrl;
+    private string HeaderSubtitle => string.IsNullOrWhiteSpace(SiteDescription)
+        ? AppVersion
+        : $"{SiteDescription} · {AppVersion}";
     private string SonnetMessageClass => _sonnetMessageIsError ? "settings-message error" : "settings-message";
     private string PromptPolishModeLabel =>
         _promptPolishOptions.FirstOrDefault(option => option.Value == Settings.PromptPolishMode)?.Label ?? "直接生成";
@@ -342,8 +345,6 @@ public partial class Home
     private string ImagePreviewStageClass => _previewEditing ? "image-preview-stage is-editing" : "image-preview-stage";
     private string ImagePreviewEditButtonClass => _previewEditing ? "active" : string.Empty;
     private bool PreviewEditSubmitDisabled => _loading || _previewImage is null || string.IsNullOrWhiteSpace(_previewEditPrompt);
-    private bool CanRevealDownloadedFile => !string.IsNullOrWhiteSpace(_lastDownloadFilePath);
-
     private IReadOnlyList<GeneratedImage> LatestImages =>
         ActiveSession.Messages.LastOrDefault(message => message.Images.Count > 0)?.Images ?? [];
 
@@ -411,24 +412,27 @@ public partial class Home
 
     private IReadOnlyList<WorkspaceSidebarItem> WorkspaceItems =>
         _snapshot.Workspaces
-            .OrderBy(workspace => WorkspaceSortOrder(workspace.Type))
+            .OrderBy(workspace => WorkspaceSortOrder("graphic"))
             .ThenByDescending(workspace => workspace.LastOpenedAt)
             .ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase)
             .Select(workspace => new WorkspaceSidebarItem(
                 workspace.Id,
                 workspace.Name,
                 WorkspaceDescription(workspace),
-                WorkspaceIcon(workspace.Type),
-                workspace.Type))
+                WorkspaceIcon("graphic"),
+                "graphic"))
             .ToArray();
 
     protected override async Task OnInitializedAsync()
     {
         _snapshot = await Storage.LoadAsync();
+        _launchContext = EmbeddedLaunchContextParser.Parse(Navigation);
+        ApplyLaunchContext(_launchContext);
+        _branding = await SiteConfig.LoadBrandingAsync();
         await LoadPromptLibraryPage(new PromptLibraryQuery(
             1,
             PromptLibraryPageSize,
-            PromptLibraryLanguage.Chinese,
+            ResolvePromptLibraryLanguage(_launchContext.Language),
             null,
             null,
             null));
@@ -443,9 +447,10 @@ public partial class Home
         {
             try
             {
-                _systemPrefersDark = await JsRuntime.InvokeAsync<bool>("imageStudio.prefersDarkTheme");
+                _systemPrefersDark = await JsRuntime.InvokeAsync<bool>("sonnetArt.prefersDarkTheme");
                 _selfReference = DotNetObjectReference.Create(this);
-                _systemThemeWatchId = await JsRuntime.InvokeAsync<string>("imageStudio.watchSystemTheme", _selfReference);
+                _systemThemeWatchId = await JsRuntime.InvokeAsync<string>("sonnetArt.watchSystemTheme", _selfReference);
+                await JsRuntime.InvokeVoidAsync("sonnetArt.clearLaunchCredentials");
             }
             catch (JSException)
             {
@@ -453,6 +458,7 @@ public partial class Home
         }
 
         await SyncDocumentThemeAsync();
+        await SyncSiteBrandingAsync();
 
         if (firstRender)
         {
@@ -486,6 +492,73 @@ public partial class Home
 
     private string TabClass(string mode) => ActiveSession.Mode == mode ? "active" : string.Empty;
     private string ThemeOptionClass(string mode) => Settings.ThemeMode == mode ? "active" : string.Empty;
+
+    private void ApplyLaunchContext(EmbeddedLaunchContext context)
+    {
+        if (!string.IsNullOrWhiteSpace(context.AccessToken))
+        {
+            Settings.SonnetAccessToken = context.AccessToken.Trim();
+            Settings.SonnetRefreshToken = string.Empty;
+            Settings.SonnetTokenExpiresAt = null;
+        }
+
+        if (context.UserId is > 0)
+        {
+            Settings.EmbeddedUserId = context.UserId;
+            Settings.User = $"sonnet:{context.UserId.Value}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.UiMode))
+        {
+            Settings.EmbeddedUiMode = StudioSettings.NormalizeEmbeddedUiMode(context.UiMode);
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.Language))
+        {
+            Settings.EmbeddedLanguage = StudioSettings.NormalizeEmbeddedLanguage(context.Language);
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.SourceHost))
+        {
+            Settings.EmbeddedSourceHost = context.SourceHost.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.SourceUrl))
+        {
+            Settings.EmbeddedSourceUrl = context.SourceUrl.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.Theme))
+        {
+            Settings.ThemeMode = StudioSettings.NormalizeThemeMode(context.Theme);
+        }
+    }
+
+    private static PromptLibraryLanguage ResolvePromptLibraryLanguage(string? language)
+    {
+        return language?.StartsWith("en", StringComparison.OrdinalIgnoreCase) == true
+            ? PromptLibraryLanguage.English
+            : PromptLibraryLanguage.Chinese;
+    }
+
+    private async Task SyncSiteBrandingAsync()
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync(
+                "sonnetArt.applySiteBranding",
+                new
+                {
+                    title = SiteTitle,
+                    description = SiteDescription,
+                    iconUrl = SiteIconUrl,
+                });
+        }
+        catch (JSException)
+        {
+        }
+    }
+
     private static string ResolveAspectRatio(string? aspectRatio, string? size)
     {
         var normalized = StudioSettings.NormalizeAspectRatio(aspectRatio);
@@ -1100,38 +1173,14 @@ public partial class Home
         var fileName = BuildDownloadFileName(image);
         try
         {
-            var result = await JsRuntime.InvokeAsync<ImageDownloadResult>("imageStudio.download", image.Url, fileName);
+            var result = await JsRuntime.InvokeAsync<ImageDownloadResult>("sonnetArt.download", image.Url, fileName);
             _downloadNotice = BuildDownloadNotice(result);
-            _lastDownloadFilePath = result?.SavedLocally == true ? result.FilePath : null;
             _error = null;
         }
         catch (Exception ex) when (ex is JSException or JSDisconnectedException)
         {
             ClearDownloadNotice();
             _error = $"下载失败：{TrimJsError(ex.Message)}";
-        }
-    }
-
-    private async Task RevealLastDownload()
-    {
-        if (string.IsNullOrWhiteSpace(_lastDownloadFilePath) || _revealDownloadBusy)
-        {
-            return;
-        }
-
-        _revealDownloadBusy = true;
-        try
-        {
-            await JsRuntime.InvokeVoidAsync("imageStudio.revealFile", _lastDownloadFilePath);
-            _error = null;
-        }
-        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
-        {
-            _error = $"无法打开文件位置：{TrimJsError(ex.Message)}";
-        }
-        finally
-        {
-            _revealDownloadBusy = false;
         }
     }
 
@@ -1321,7 +1370,7 @@ public partial class Home
         string? maskDataUrl = null;
         try
         {
-            maskDataUrl = await JsRuntime.InvokeAsync<string?>("imageStudio.previewEditor.exportMask", _previewMaskCanvas);
+            maskDataUrl = await JsRuntime.InvokeAsync<string?>("sonnetArt.previewEditor.exportMask", _previewMaskCanvas);
         }
         catch (Exception ex) when (ex is JSException or JSDisconnectedException)
         {
@@ -1403,7 +1452,7 @@ public partial class Home
             var jsArgs = string.Equals(command, "attach", StringComparison.Ordinal)
                 ? args
                 : new object?[] { _previewMaskCanvas }.Concat(args).ToArray();
-            await JsRuntime.InvokeVoidAsync($"imageStudio.previewEditor.{command}", jsArgs);
+            await JsRuntime.InvokeVoidAsync($"sonnetArt.previewEditor.{command}", jsArgs);
         }
         catch (Exception ex) when (ex is JSException or JSDisconnectedException)
         {
@@ -1422,7 +1471,7 @@ public partial class Home
     private string BuildDownloadFileName(GeneratedImage image)
     {
         var extension = ExtensionFromImage(image);
-        return $"cosmos-image-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.{extension}";
+        return $"sonnetart-image-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.{extension}";
     }
 
     private string ExtensionFromImage(GeneratedImage image)
@@ -1468,8 +1517,6 @@ public partial class Home
     private void ClearDownloadNotice()
     {
         _downloadNotice = null;
-        _lastDownloadFilePath = null;
-        _revealDownloadBusy = false;
     }
 
     private static string TrimJsError(string message)
@@ -1500,7 +1547,7 @@ public partial class Home
     {
         try
         {
-            await JsRuntime.InvokeVoidAsync("imageStudio.window.invoke", command);
+            await JsRuntime.InvokeVoidAsync("sonnetArt.window.invoke", command);
         }
         catch (JSException)
         {
@@ -1726,24 +1773,8 @@ public partial class Home
 
     private async Task<string> PersistImageUrlAsync(string url, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(url) ||
-            url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
-        {
-            return url;
-        }
-
-        try
-        {
-            var response = await Http.GetFromJsonAsync<PersistedImageResponse>(
-                $"api/local/image-data?url={Uri.EscapeDataString(url)}",
-                cancellationToken);
-
-            return string.IsNullOrWhiteSpace(response?.DataUrl) ? url : response.DataUrl;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            return url;
-        }
+        await Task.CompletedTask;
+        return url;
     }
 
     private async Task NewSession()
@@ -1953,7 +1984,7 @@ public partial class Home
 
     private async Task CopyPrompt(PromptLibrarySelection selection)
     {
-        await JsRuntime.InvokeVoidAsync("imageStudio.copyText", selection.Prompt);
+        await JsRuntime.InvokeVoidAsync("sonnetArt.copyText", selection.Prompt);
         _promptLibraryNotice = "已复制";
     }
 
@@ -2259,7 +2290,7 @@ public partial class Home
             prompt = image.RevisedPrompt ?? string.Empty;
         }
 
-        await JsRuntime.InvokeVoidAsync("imageStudio.copyText", prompt);
+        await JsRuntime.InvokeVoidAsync("sonnetArt.copyText", prompt);
         _downloadNotice = "提示词已复制。";
     }
 
@@ -2290,7 +2321,7 @@ public partial class Home
             estimatedCost = image.EstimatedCost,
             durationMs = image.DurationMs,
         };
-        await JsRuntime.InvokeVoidAsync("imageStudio.copyText", JsonSerializer.Serialize(payload, ClipboardJsonOptions));
+        await JsRuntime.InvokeVoidAsync("sonnetArt.copyText", JsonSerializer.Serialize(payload, ClipboardJsonOptions));
         _downloadNotice = "参数已复制。";
     }
 
@@ -2614,7 +2645,7 @@ public partial class Home
         _lastDocumentTheme = effectiveTheme;
         try
         {
-            await JsRuntime.InvokeVoidAsync("imageStudio.setDocumentTheme", effectiveTheme);
+            await JsRuntime.InvokeVoidAsync("sonnetArt.setDocumentTheme", effectiveTheme);
         }
         catch (JSException)
         {
@@ -2623,8 +2654,6 @@ public partial class Home
 
     private void OpenSettings() => _settingsOpen = true;
     private void CloseSettings() => _settingsOpen = false;
-    private void OpenAuthProxySettings() => _authProxyOpen = true;
-    private void CloseAuthProxySettings() => _authProxyOpen = false;
 
     private void ToggleSonnetRegister()
     {
@@ -2688,11 +2717,11 @@ public partial class Home
         });
     }
 
-    private async Task EnsureCosmosKey()
+    private async Task EnsureSonnetArtKey()
     {
         await RunSonnetAction(async () =>
         {
-            await SonnetClient.EnsureCosmosApiKeyAsync(Settings);
+            await SonnetClient.EnsureSonnetArtApiKeyAsync(Settings);
             await SonnetClient.EnsureOpenAiApiKeyAsync(Settings);
             await SaveAsync();
             SetSonnetMessage("账户已准备好。");
@@ -2802,7 +2831,7 @@ public partial class Home
 
         try
         {
-            using var response = await Http.GetAsync("api/local/health", cancellationToken);
+            using var response = await Http.GetAsync("api/sonnet/settings/public", cancellationToken);
             _serverOnline = response.IsSuccessStatusCode;
         }
         catch
@@ -2851,7 +2880,7 @@ public partial class Home
     private async Task CompleteAccountSetupAsync()
     {
         await SonnetClient.RefreshProfileAsync(Settings);
-        await SonnetClient.EnsureCosmosApiKeyAsync(Settings);
+        await SonnetClient.EnsureSonnetArtApiKeyAsync(Settings);
         await SonnetClient.EnsureOpenAiApiKeyAsync(Settings);
     }
 
@@ -3240,12 +3269,6 @@ public partial class Home
     private void UpdateSonnetPromoCode(ChangeEventArgs args) { _sonnetPromoCode = args.Value?.ToString() ?? string.Empty; }
     private void UpdateSonnetInvitationCode(ChangeEventArgs args) { _sonnetInvitationCode = args.Value?.ToString() ?? string.Empty; }
     private void UpdateRedeemCode(ChangeEventArgs args) { _redeemCode = args.Value?.ToString() ?? string.Empty; }
-    private async Task UpdateSonnetProxyUrl(ChangeEventArgs args)
-    {
-        Settings.SonnetProxyUrl = NormalizeProxyUrl(args.Value?.ToString());
-        await SaveAsync();
-    }
-
     private void ToggleRatioMenu()
     {
         _ratioMenuOpen = !_ratioMenuOpen;
@@ -3370,17 +3393,6 @@ public partial class Home
     private async Task UpdatePartial(int value) { Settings.PartialImages = Math.Clamp(value, 0, 3); CoerceImageSettingsForCurrentModel(); await SaveAsync(); }
     private async Task UpdateAdvancedJson(ChangeEventArgs args) { Settings.AdvancedJson = args.Value?.ToString() ?? string.Empty; await SaveAsync(); }
 
-    private static string NormalizeProxyUrl(string? value)
-    {
-        var proxy = value?.Trim() ?? string.Empty;
-        if (proxy.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        return proxy.Contains("://", StringComparison.Ordinal) ? proxy : $"http://{proxy}";
-    }
-
     private void EnsureActiveMode()
     {
         if (string.IsNullOrWhiteSpace(ActiveSession.Mode) || ActiveSession.Mode == "text")
@@ -3404,7 +3416,7 @@ public partial class Home
     {
         if (!string.IsNullOrWhiteSpace(_systemThemeWatchId))
         {
-            _ = JsRuntime.InvokeVoidAsync("imageStudio.unwatchSystemTheme", _systemThemeWatchId);
+            _ = JsRuntime.InvokeVoidAsync("sonnetArt.unwatchSystemTheme", _systemThemeWatchId);
         }
 
         _selfReference?.Dispose();
@@ -3418,8 +3430,4 @@ public partial class Home
         _serverStatusCts?.Dispose();
     }
 
-    private sealed class PersistedImageResponse
-    {
-        public string DataUrl { get; set; } = string.Empty;
-    }
 }

@@ -1,4 +1,4 @@
-namespace SonnetArt.ImageStudio.Services;
+namespace SonnetArt.Services;
 
 public static class ImageEditPromptBuilder
 {

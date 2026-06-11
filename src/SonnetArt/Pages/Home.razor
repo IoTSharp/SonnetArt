@@ -1,20 +1,21 @@
 @page "/"
-@inject ImageStudioStorage Storage
+@inject SonnetArtStorage Storage
 @inject ImageGenerationClient ImageClient
 @inject PromptChatClient ChatClient
 @inject PromptLibraryService PromptLibrary
 @inject SonnetAccountClient SonnetClient
+@inject SiteConfigurationClient SiteConfig
 @inject IJSRuntime JsRuntime
 @inject HttpClient Http
 @inject NavigationManager Navigation
 @implements IDisposable
 @using QRCoder
 
-<PageTitle>@AppName</PageTitle>
+<PageTitle>@SiteTitle</PageTitle>
 
 <XProvider Theme="@ProviderTheme" Tokens="@ThemeTokens" Class="@RootThemeClass">
     <div class="studio-shell">
-        <StudioTopBar Title="@AppName" Subtitle="@HeaderSubtitle" OnClose="CloseWindowAsync">
+        <StudioTopBar Title="@SiteTitle" Subtitle="@HeaderSubtitle" IconUrl="@SiteIconUrl" OnClose="CloseWindowAsync">
             <button type="button" class="studio-button studio-button-light" title="我的账户" @onclick="OpenSettings">
                 <Icon Type="user" Theme="IconThemeType.Outline" />
                 <span>我的账户</span>
@@ -311,13 +312,6 @@
                 {
                     <div class="studio-notice">
                         <span>@_downloadNotice</span>
-                        @if (CanRevealDownloadedFile)
-                        {
-                            <button type="button" disabled="@_revealDownloadBusy" title="在文件夹中显示" @onclick="RevealLastDownload">
-                                <Icon Type="@(_revealDownloadBusy ? "loading" : "folder-open")" Theme="IconThemeType.Outline" />
-                                <span>@(_revealDownloadBusy ? "打开中" : "在文件夹中显示")</span>
-                            </button>
-                        }
                     </div>
                 }
 
@@ -602,12 +596,8 @@
     </div>
 
     <WorkspaceCreateDialog Open="@_workspaceCreateOpen"
-                           WorkspaceType="@_workspaceCreateType"
-                           WorkspaceTypeChanged="@SetWorkspaceCreateType"
                            Name="@_workspaceCreateName"
                            NameChanged="@SetWorkspaceCreateName"
-                           RootPath="@_workspaceCreateRootPath"
-                           RootPathChanged="@SetWorkspaceCreateRootPath"
                            OnCreate="@CreateWorkspace"
                            OnCancel="@CloseWorkspaceCreate" />
 
@@ -694,18 +684,6 @@
                     </nav>
 
                     <div class="settings-section-title">
-                        <strong>Sonnet 代理</strong>
-                        <span>仅 sonnet.vip 接口</span>
-                    </div>
-
-                    <div class="studio-field">
-                        <label class="studio-label">代理地址</label>
-                        <input class="studio-input" autocomplete="off" placeholder="http://127.0.0.1:7890" value="@Settings.SonnetProxyUrl" @onchange="UpdateSonnetProxyUrl" />
-                    </div>
-
-                    <div class="settings-divider"></div>
-
-                    <div class="settings-section-title">
                         <strong>兑换码</strong>
                         <span>兑换余额或账户权益</span>
                     </div>
@@ -761,7 +739,7 @@
             <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="exit-confirm-title" @onclick:stopPropagation>
                 <header>
                     <div>
-                        <span class="workspace-eyebrow">退出 Cosmos</span>
+                        <span class="workspace-eyebrow">退出 @SiteTitle</span>
                         <h2 id="exit-confirm-title">确定要彻底退出吗？</h2>
                     </div>
                 </header>
@@ -973,7 +951,7 @@
                         <span class="studio-logo-spark"></span>
                     </div>
                     <div>
-                        <span>@AppName</span>
+                        <span>@SiteTitle</span>
                         <h2 id="auth-title">@(_sonnetRegisterOpen ? "创建账户" : "登录账户")</h2>
                     </div>
                 </div>
@@ -993,15 +971,6 @@
                         <input class="studio-input" type="password" autocomplete="@(_sonnetRegisterOpen ? "new-password" : "current-password")" value="@_sonnetPassword" @oninput="UpdateSonnetPassword" />
                     </div>
                 </div>
-
-                <button type="button" class="auth-proxy-link" @onclick="OpenAuthProxySettings">
-                    <Icon Type="global" Theme="IconThemeType.Outline" />
-                    <span>代理设置</span>
-                    @if (!string.IsNullOrWhiteSpace(Settings.SonnetProxyUrl))
-                    {
-                        <strong>已启用</strong>
-                    }
-                </button>
 
                 @if (_sonnetRegisterOpen)
                 {
@@ -1027,32 +996,6 @@
                     <span>@AuthButtonText</span>
                 </button>
             </section>
-
-            @if (_authProxyOpen)
-            {
-                <section class="auth-proxy-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-proxy-title" @onclick:stopPropagation>
-                    <header>
-                        <div>
-                            <span class="workspace-eyebrow">连接设置</span>
-                            <h2 id="auth-proxy-title">Sonnet 代理</h2>
-                        </div>
-                        <button type="button" title="关闭" @onclick="CloseAuthProxySettings">
-                            <Icon Type="close" Theme="IconThemeType.Outline" />
-                        </button>
-                    </header>
-
-                    <div class="studio-field">
-                        <label class="studio-label">代理地址</label>
-                        <input class="studio-input" autocomplete="off" placeholder="http://127.0.0.1:7890" value="@Settings.SonnetProxyUrl" @onchange="UpdateSonnetProxyUrl" />
-                    </div>
-
-                    <footer>
-                        <button type="button" class="studio-button studio-button-light" @onclick="CloseAuthProxySettings">
-                            <span>完成</span>
-                        </button>
-                    </footer>
-                </section>
-            }
         </div>
     }
 </XProvider>

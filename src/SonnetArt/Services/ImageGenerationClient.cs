@@ -5,17 +5,14 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using SonnetArt.ImageStudio.Models;
+using SonnetArt.Models;
 
-namespace SonnetArt.ImageStudio.Services;
+namespace SonnetArt.Services;
 
 public sealed class ImageGenerationClient
 {
     private const string LocalProxyRoot = "/api/openai/";
-    private const string LocalProxyHeader = "X-Cosmos-Sonnet-Proxy";
-    private const string UpstreamBaseHeader = "X-Cosmos-Sonnet-Base";
-    private const string HttpProxyHeader = "X-Cosmos-Sonnet-Http-Proxy";
-    private const string DefaultImageBaseUrl = "https://sonnet.vip/";
+    private const string LocalProxyHeader = "X-SonnetArt-Proxy";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -38,11 +35,11 @@ public sealed class ImageGenerationClient
             throw new InvalidOperationException("请先登录账户。");
         }
         ValidateRequest(studioRequest);
-        var upstreamEndpoint = BuildLegacyEndpoint(settings.BaseUrl, studioRequest);
+        var endpointPath = BuildImageEndpointPath(studioRequest);
 
         try
         {
-            return await SendOnceAsync(studioRequest, upstreamEndpoint, useLocalProxy: true, cancellationToken);
+            return await SendOnceAsync(studioRequest, endpointPath, cancellationToken);
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -52,55 +49,25 @@ public sealed class ImageGenerationClient
         {
             throw CreateImageTimeoutException(ex);
         }
-        catch (ImageProxyUnavailableException)
-        {
-            try
-            {
-                return await SendOnceAsync(studioRequest, upstreamEndpoint, useLocalProxy: false, cancellationToken);
-            }
-            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-            {
-                throw CreateImageTimeoutException(ex);
-            }
-            catch (HttpRequestException ex) when (LooksLikeImageTimeout(ex.Message))
-            {
-                throw CreateImageTimeoutException(ex);
-            }
-            catch (HttpRequestException ex) when (LooksLikeBrowserLoadFailure(ex.Message))
-            {
-                throw new HttpRequestException("无法连接图像接口：浏览器直连失败，请确认本地 Host 正在运行，或检查网络/代理设置。", ex);
-            }
-        }
     }
 
     private async Task<StudioImageResult> SendOnceAsync(
         StudioImageRequest studioRequest,
-        Uri upstreamEndpoint,
-        bool useLocalProxy,
+        string endpointPath,
         CancellationToken cancellationToken)
     {
         var settings = studioRequest.Settings;
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Post,
-            useLocalProxy ? BuildLocalProxyEndpoint(upstreamEndpoint) : upstreamEndpoint)
+        using var request = new HttpRequestMessage(HttpMethod.Post, BuildLocalProxyEndpoint(endpointPath))
         {
             Content = RequiresMultipart(studioRequest)
                 ? BuildMultipartContent(studioRequest)
                 : JsonContent.Create(BuildPayload(studioRequest), options: JsonOptions),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ImageApiKey.Trim());
-        if (useLocalProxy)
-        {
-            request.Headers.TryAddWithoutValidation(UpstreamBaseHeader, BuildProxyUpstreamRoot(upstreamEndpoint));
-            if (!string.IsNullOrWhiteSpace(settings.SonnetProxyUrl))
-            {
-                request.Headers.TryAddWithoutValidation(HttpProxyHeader, settings.SonnetProxyUrl.Trim());
-            }
-        }
 
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (useLocalProxy && !response.Headers.Contains(LocalProxyHeader))
+        if (!response.Headers.Contains(LocalProxyHeader))
         {
             throw new ImageProxyUnavailableException();
         }
@@ -123,137 +90,22 @@ public sealed class ImageGenerationClient
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException(
-                $"图像接口返回 {(int)response.StatusCode} {response.ReasonPhrase}: {ExtractErrorMessage(raw)}。{BuildErrorContext(studioRequest, upstreamEndpoint)}");
+                $"图像接口返回 {(int)response.StatusCode} {response.ReasonPhrase}: {ExtractErrorMessage(raw)}。{BuildErrorContext(studioRequest, endpointPath)}");
         }
 
         return new StudioImageResult(images, raw);
     }
 
-    private static Uri BuildLocalProxyEndpoint(Uri upstreamEndpoint)
+    private static Uri BuildLocalProxyEndpoint(string endpointPath)
     {
-        upstreamEndpoint = NormalizeLegacyVariationsEndpoint(upstreamEndpoint);
-        var path = upstreamEndpoint.AbsolutePath.TrimStart('/');
-        return new Uri(LocalProxyRoot + path + upstreamEndpoint.Query, UriKind.Relative);
+        return new Uri(LocalProxyRoot + endpointPath.TrimStart('/'), UriKind.Relative);
     }
 
-    private static string BuildProxyUpstreamRoot(Uri upstreamEndpoint)
+    private static string BuildImageEndpointPath(StudioImageRequest request)
     {
-        upstreamEndpoint = NormalizeLegacyVariationsEndpoint(upstreamEndpoint);
-        return upstreamEndpoint.GetLeftPart(UriPartial.Authority) + "/";
-    }
-
-    private static Uri NormalizeLegacyVariationsEndpoint(Uri endpoint)
-    {
-        return endpoint.AbsolutePath.TrimEnd('/').EndsWith("/images/variations", StringComparison.OrdinalIgnoreCase)
-            ? new Uri(ReplaceLastPathSegment(endpoint.ToString(), "edits"), UriKind.Absolute)
-            : endpoint;
-    }
-
-    private static Uri BuildLegacyEndpoint(string baseUrl, StudioImageRequest request)
-    {
-        var normalized = NormalizeKnownOpenAiBaseUrl(NormalizeBaseUrl(baseUrl));
-        var imageEndpoint = TrimTrailingSlashBeforeQuery(normalized);
-
-        if (imageEndpoint.EndsWith("/v1/images/generations", StringComparison.OrdinalIgnoreCase) ||
-            imageEndpoint.EndsWith("/images/generations", StringComparison.OrdinalIgnoreCase))
-        {
-            return new Uri(imageEndpoint, UriKind.Absolute);
-        }
-
-        if (imageEndpoint.EndsWith("/v1/images/edits", StringComparison.OrdinalIgnoreCase) ||
-            imageEndpoint.EndsWith("/images/edits", StringComparison.OrdinalIgnoreCase))
-        {
-            return new Uri(imageEndpoint, UriKind.Absolute);
-        }
-
-        if (imageEndpoint.EndsWith("/v1/images/variations", StringComparison.OrdinalIgnoreCase) ||
-            imageEndpoint.EndsWith("/images/variations", StringComparison.OrdinalIgnoreCase))
-        {
-            return new Uri(ReplaceLastPathSegment(imageEndpoint, "edits"), UriKind.Absolute);
-        }
-
-        if (!normalized.EndsWith('/'))
-        {
-            normalized += "/";
-        }
-
-        var path = RequiresEditEndpoint(request)
-                ? "images/edits"
-                : "images/generations";
-
-        return new Uri(BuildOpenAiRoot(normalized), path);
-    }
-
-    private static string TrimTrailingSlashBeforeQuery(string value)
-    {
-        var queryIndex = value.IndexOf('?', StringComparison.Ordinal);
-        if (queryIndex < 0)
-        {
-            return value.TrimEnd('/');
-        }
-
-        return value[..queryIndex].TrimEnd('/') + value[queryIndex..];
-    }
-
-    private static Uri BuildOpenAiRoot(string normalizedBaseUrl)
-    {
-        var uri = new Uri(normalizedBaseUrl, UriKind.Absolute);
-        var path = uri.AbsolutePath.Trim('/');
-        if (path.Equals("v1", StringComparison.OrdinalIgnoreCase) ||
-            path.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
-        {
-            return uri;
-        }
-
-        return new Uri(uri, "v1/");
-    }
-
-    private static string ReplaceLastPathSegment(string normalizedUrl, string segment)
-    {
-        var queryIndex = normalizedUrl.IndexOf('?', StringComparison.Ordinal);
-        var query = queryIndex >= 0 ? normalizedUrl[queryIndex..] : string.Empty;
-        var path = (queryIndex >= 0 ? normalizedUrl[..queryIndex] : normalizedUrl).TrimEnd('/');
-        var slashIndex = path.LastIndexOf('/');
-        return slashIndex < 0
-            ? normalizedUrl
-            : $"{path[..(slashIndex + 1)]}{segment}{query}";
-    }
-
-    private static string NormalizeBaseUrl(string baseUrl)
-    {
-        var normalized = string.IsNullOrWhiteSpace(baseUrl)
-            ? DefaultImageBaseUrl
-            : baseUrl.Trim();
-
-        if (!normalized.EndsWith('/'))
-        {
-            normalized += "/";
-        }
-
-        return normalized;
-    }
-
-    private static string NormalizeKnownOpenAiBaseUrl(string baseUrl)
-    {
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) ||
-            !string.Equals(uri.Host, "sonnet.vip", StringComparison.OrdinalIgnoreCase))
-        {
-            return baseUrl;
-        }
-
-        var path = uri.AbsolutePath.Trim('/');
-        if (path.Equals("api/v1", StringComparison.OrdinalIgnoreCase))
-        {
-            return $"{uri.Scheme}://{uri.Authority}/v1/";
-        }
-
-        const string apiImagePrefix = "/api/v1/images/";
-        if (uri.AbsolutePath.StartsWith(apiImagePrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return $"{uri.Scheme}://{uri.Authority}/v1/images/{uri.AbsolutePath[apiImagePrefix.Length..]}{uri.Query}";
-        }
-
-        return baseUrl;
+        return RequiresEditEndpoint(request)
+            ? "v1/images/edits"
+            : "v1/images/generations";
     }
 
     private static bool RequiresMultipart(StudioImageRequest studioRequest)
@@ -555,11 +407,11 @@ public sealed class ImageGenerationClient
         }
     }
 
-    private static string BuildErrorContext(StudioImageRequest studioRequest, Uri upstreamEndpoint)
+    private static string BuildErrorContext(StudioImageRequest studioRequest, string endpointPath)
     {
         var settings = ImageModelCatalog.NormalizeSettings(studioRequest.Settings, studioRequest.Mode);
         var capabilities = ImageModelCatalog.Get(settings.Model, studioRequest.Mode);
-        var endpoint = upstreamEndpoint.AbsolutePath.EndsWith("/images/edits", StringComparison.OrdinalIgnoreCase)
+        var endpoint = endpointPath.EndsWith("/images/edits", StringComparison.OrdinalIgnoreCase)
             ? "images/edits"
             : "images/generations";
         var requestMode = capabilities.SupportsStream &&
@@ -1145,14 +997,6 @@ public sealed class ImageGenerationClient
     private static string? NullIfEmpty(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-    }
-
-    private static bool LooksLikeBrowserLoadFailure(string? message)
-    {
-        return !string.IsNullOrWhiteSpace(message) &&
-            (message.Contains("TypeError: Load failed", StringComparison.OrdinalIgnoreCase) ||
-            message.Contains("TypeError: Failed to fetch", StringComparison.OrdinalIgnoreCase) ||
-            message.Contains("Failed to fetch", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool LooksLikeImageTimeout(string? message)

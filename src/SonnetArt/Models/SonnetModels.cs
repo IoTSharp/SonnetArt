@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace SonnetArt.ImageStudio.Models;
+namespace SonnetArt.Models;
 
 public sealed class SonnetAuthResponse
 {

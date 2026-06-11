@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-cosmos-theme="light">
+<html lang="zh-CN" data-sonnetart-theme="light">
 
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cosmos</title>
+    <meta name="description" content="AI image studio" />
+    <title>SonnetArt</title>
     <base href="/" />
     <link rel="preload" id="webassembly" />
     <link rel="stylesheet" href="_content/AntDesign/css/ant-design-blazor.css" />
@@ -12,12 +13,12 @@
     <link rel="stylesheet" href="css/app.css" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="alternate icon" type="image/png" href="favicon.png" />
-    <link href="SonnetArt.ImageStudio.styles.css" rel="stylesheet" />
+    <link href="SonnetArt.styles.css" rel="stylesheet" />
     <script type="importmap"></script>
     <script>
         (() => {
             const theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-            document.documentElement.dataset.cosmosTheme = theme;
+            document.documentElement.dataset.sonnetartTheme = theme;
             document.documentElement.style.colorScheme = theme;
         })();
     </script>
@@ -38,7 +39,7 @@
         <span class="dismiss">x</span>
     </div>
     <script src="_content/AntDesign/js/ant-design-blazor.js"></script>
-    <script src="js/image-studio.js"></script>
+    <script src="js/sonnetart.js"></script>
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
 </body>
 

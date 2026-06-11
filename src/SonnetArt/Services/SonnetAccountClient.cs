@@ -4,22 +4,18 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using SonnetArt.ImageStudio.Models;
+using SonnetArt.Models;
 
-namespace SonnetArt.ImageStudio.Services;
+namespace SonnetArt.Services;
 
 public sealed class SonnetAccountClient
 {
-    private const string DefaultGatewayBaseUrl = "https://sonnet.vip/";
     private const string LocalProxyRoot = "/api/sonnet/";
-    private const string LocalProxyHeader = "X-Cosmos-Sonnet-Proxy";
-    private const string UpstreamBaseHeader = "X-Cosmos-Sonnet-Base";
-    private const string HttpProxyHeader = "X-Cosmos-Sonnet-Http-Proxy";
-    private const string CosmosKeyName = "SonnetArt Image";
-    private const string LegacyCosmosKeyName = "Cosmos";
-    private const string CosmosKeySearch = "Cosmos";
+    private const string LocalProxyHeader = "X-SonnetArt-Proxy";
+    private const string SonnetArtKeyName = "SonnetArt Image";
+    private const string SonnetArtKeySearch = "SonnetArt";
     private const string OpenAiKeyName = "SonnetArt OpenAI";
-    private const string OpenAiKeySearch = "Cosmos";
+    private const string OpenAiKeySearch = "OpenAI";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -146,19 +142,19 @@ public sealed class SonnetAccountClient
             cancellationToken);
     }
 
-    public async Task<SonnetEnsureApiKeyResult> EnsureCosmosApiKeyAsync(
+    public async Task<SonnetEnsureApiKeyResult> EnsureSonnetArtApiKeyAsync(
         StudioSettings settings,
         CancellationToken cancellationToken = default)
     {
         await EnsureTokenAsync(settings, cancellationToken);
         var groups = await GetAvailableGroupsAsync(settings, cancellationToken);
-        var group = ResolveCosmosGroup(groups);
-        var keys = await ListApiKeysAsync(settings, CosmosKeySearch, cancellationToken: cancellationToken);
+        var group = ResolveSonnetArtGroup(groups);
+        var keys = await ListApiKeysAsync(settings, SonnetArtKeySearch, cancellationToken: cancellationToken);
         var existing = keys.Items
             .Where(IsUsableKey)
             .Where(key => IsImageKey(key, group))
             .OrderByDescending(key => key.GroupId == group?.Id)
-            .ThenByDescending(key => key.Name.Equals(CosmosKeyName, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(key => key.Name.Equals(SonnetArtKeyName, StringComparison.OrdinalIgnoreCase))
             .FirstOrDefault();
 
         if (existing is not null)
@@ -175,15 +171,14 @@ public sealed class SonnetAccountClient
             };
         }
 
-        var created = await CreateApiKeyAsync(settings, CosmosKeyName, group?.Id, cancellationToken);
+        var created = await CreateApiKeyAsync(settings, SonnetArtKeyName, group?.Id, cancellationToken);
         ApplyApiKey(settings, created, created.Group ?? group);
         return new SonnetEnsureApiKeyResult
         {
             Created = true,
             UsedFallbackGroup = group is not null &&
                 !IsImageGroup(group) &&
-                !group.Name.Equals(CosmosKeyName, StringComparison.OrdinalIgnoreCase) &&
-                !group.Name.Equals(LegacyCosmosKeyName, StringComparison.OrdinalIgnoreCase),
+                !group.Name.Equals(SonnetArtKeyName, StringComparison.OrdinalIgnoreCase),
             ApiKey = created.Key,
             ApiKeyId = created.Id,
             ApiKeyName = created.Name,
@@ -248,7 +243,7 @@ public sealed class SonnetAccountClient
             "keys",
             new
             {
-                name = string.IsNullOrWhiteSpace(name) ? CosmosKeyName : name.Trim(),
+                name = string.IsNullOrWhiteSpace(name) ? SonnetArtKeyName : name.Trim(),
                 group_id = groupId,
             },
             settings.SonnetAccessToken,
@@ -294,7 +289,7 @@ public sealed class SonnetAccountClient
                 amount,
                 payment_type = resolvedPaymentType,
                 order_type = "balance",
-                return_url = BuildAbsoluteUrl(settings.BaseUrl, "payment/result"),
+                return_url = "/payment/result",
                 is_mobile = false,
             },
             settings.SonnetAccessToken,
@@ -463,14 +458,7 @@ public sealed class SonnetAccountClient
         }
         catch (SonnetProxyUnavailableException)
         {
-            return await SendOnceAsync<T>(
-                settings,
-                method,
-                path,
-                body,
-                accessToken,
-                useLocalProxy: false,
-                cancellationToken);
+            throw new HttpRequestException("账户代理不可用，请检查 SonnetArt 服务配置。");
         }
     }
 
@@ -485,17 +473,9 @@ public sealed class SonnetAccountClient
     {
         using var request = new HttpRequestMessage(
             method,
-            useLocalProxy ? BuildLocalProxyEndpoint(path) : BuildEndpoint(settings.BaseUrl, path));
+            BuildLocalProxyEndpoint(path));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.AcceptLanguage.ParseAdd("zh-CN");
-        if (useLocalProxy)
-        {
-            request.Headers.TryAddWithoutValidation(UpstreamBaseHeader, BuildAbsoluteUrl(settings.BaseUrl, string.Empty));
-            if (!string.IsNullOrWhiteSpace(settings.SonnetProxyUrl))
-            {
-                request.Headers.TryAddWithoutValidation(HttpProxyHeader, settings.SonnetProxyUrl.Trim());
-            }
-        }
 
         if (!string.IsNullOrWhiteSpace(accessToken))
         {
@@ -600,7 +580,7 @@ public sealed class SonnetAccountClient
         settings.SonnetApiKeyName = key.Name;
         settings.SonnetGroupId = key.GroupId ?? group?.Id;
         settings.SonnetGroupName = group?.Name ?? key.Group?.Name ?? string.Empty;
-        settings.BaseUrl = BuildAbsoluteUrl(settings.BaseUrl, string.Empty);
+        settings.BaseUrl = StudioSettings.DefaultBaseUrl;
     }
 
     private static void ApplyOpenAiApiKey(StudioSettings settings, SonnetApiKey key, SonnetGroup? group)
@@ -610,7 +590,7 @@ public sealed class SonnetAccountClient
         settings.SonnetOpenAiApiKeyName = key.Name;
         settings.SonnetOpenAiGroupId = key.GroupId ?? group?.Id;
         settings.SonnetOpenAiGroupName = group?.Name ?? key.Group?.Name ?? string.Empty;
-        settings.BaseUrl = BuildAbsoluteUrl(settings.BaseUrl, string.Empty);
+        settings.BaseUrl = StudioSettings.DefaultBaseUrl;
     }
 
     private static bool IsUsableKey(SonnetApiKey key)
@@ -646,19 +626,13 @@ public sealed class SonnetAccountClient
             (group is not null && key.GroupId == group.Id);
     }
 
-    private static SonnetGroup? ResolveCosmosGroup(IReadOnlyList<SonnetGroup> groups)
+    private static SonnetGroup? ResolveSonnetArtGroup(IReadOnlyList<SonnetGroup> groups)
     {
         return groups.FirstOrDefault(group =>
                 IsActiveGroup(group) &&
                 IsImageGroup(group))
             ?? groups.FirstOrDefault(group =>
-                group.Name.Equals(CosmosKeyName, StringComparison.OrdinalIgnoreCase) &&
-                IsActiveGroup(group))
-            ?? groups.FirstOrDefault(group =>
-                group.Name.Equals(LegacyCosmosKeyName, StringComparison.OrdinalIgnoreCase) &&
-                IsActiveGroup(group))
-            ?? groups.FirstOrDefault(group =>
-                group.Name.Contains(LegacyCosmosKeyName, StringComparison.OrdinalIgnoreCase) &&
+                group.Name.Equals(SonnetArtKeyName, StringComparison.OrdinalIgnoreCase) &&
                 IsActiveGroup(group))
             ?? groups.FirstOrDefault(group =>
                 string.Equals(group.Platform, "openai", StringComparison.OrdinalIgnoreCase) &&
@@ -678,8 +652,7 @@ public sealed class SonnetAccountClient
             ?? groups.FirstOrDefault(group =>
                 string.Equals(group.Platform, "openai", StringComparison.OrdinalIgnoreCase) &&
                 !IsImageGroup(group) &&
-                !group.Name.Contains(CosmosKeyName, StringComparison.OrdinalIgnoreCase) &&
-                !group.Name.Contains(LegacyCosmosKeyName, StringComparison.OrdinalIgnoreCase) &&
+                !group.Name.Contains(SonnetArtKeyName, StringComparison.OrdinalIgnoreCase) &&
                 IsActiveGroup(group))
             ?? groups.FirstOrDefault(group =>
                 string.Equals(group.Platform, "openai", StringComparison.OrdinalIgnoreCase) &&
@@ -696,8 +669,7 @@ public sealed class SonnetAccountClient
 
     private static bool IsImageKeyName(string name)
     {
-        return name.Equals(CosmosKeyName, StringComparison.OrdinalIgnoreCase) ||
-            name.Equals(LegacyCosmosKeyName, StringComparison.OrdinalIgnoreCase) ||
+        return name.Equals(SonnetArtKeyName, StringComparison.OrdinalIgnoreCase) ||
             ContainsAny(name, "image", "gpt-image", "图片", "图像", "作图");
     }
 
@@ -767,36 +739,9 @@ public sealed class SonnetAccountClient
         throw new InvalidOperationException("当前没有可用的充值方式。");
     }
 
-    private static Uri BuildEndpoint(string baseUrl, string path)
-    {
-        var root = string.IsNullOrWhiteSpace(baseUrl) ? DefaultGatewayBaseUrl : baseUrl.Trim();
-        if (!root.EndsWith('/'))
-        {
-            root += "/";
-        }
-
-        if (!root.EndsWith("api/v1/", StringComparison.OrdinalIgnoreCase))
-        {
-            root += "api/v1/";
-        }
-
-        return new Uri(new Uri(root, UriKind.Absolute), path);
-    }
-
     private static Uri BuildLocalProxyEndpoint(string path)
     {
         return new Uri(LocalProxyRoot + path.TrimStart('/'), UriKind.Relative);
-    }
-
-    private static string BuildAbsoluteUrl(string baseUrl, string path)
-    {
-        var root = string.IsNullOrWhiteSpace(baseUrl) ? DefaultGatewayBaseUrl : baseUrl.Trim();
-        if (!root.EndsWith('/'))
-        {
-            root += "/";
-        }
-
-        return new Uri(new Uri(root, UriKind.Absolute), path).ToString();
     }
 
     private static string? EmptyToNull(string? value)

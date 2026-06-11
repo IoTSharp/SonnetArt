@@ -1,8 +1,8 @@
 using System.Net.Http.Json;
 using System.Text.Json;
-using SonnetArt.ImageStudio.Models;
+using SonnetArt.Models;
 
-namespace SonnetArt.ImageStudio.Services;
+namespace SonnetArt.Services;
 
 public sealed class PromptLibraryService
 {
@@ -23,28 +23,6 @@ public sealed class PromptLibraryService
     {
         var page = Math.Max(1, query.Page);
         var pageSize = Math.Clamp(query.PageSize, 1, MaxPageSize);
-        var requestUri =
-            $"api/local/prompt-library?page={page}&pageSize={pageSize}&language={query.Language}&source={Uri.EscapeDataString(query.Source ?? string.Empty)}&category={Uri.EscapeDataString(query.Category ?? string.Empty)}&search={Uri.EscapeDataString(query.Search ?? string.Empty)}";
-
-        try
-        {
-            var remotePage = await _httpClient.GetFromJsonAsync<PromptLibraryPage>(requestUri);
-            if (remotePage is not null)
-            {
-                CaptureFilters(remotePage);
-                return remotePage;
-            }
-        }
-        catch (HttpRequestException)
-        {
-        }
-        catch (NotSupportedException)
-        {
-        }
-        catch (JsonException)
-        {
-        }
-
         return await LoadStaticPageAsync(query with { Page = page, PageSize = pageSize });
     }
 
@@ -98,13 +76,6 @@ public sealed class PromptLibraryService
             CategoriesZh = _categoriesZh.ToList(),
             CategoriesEn = _categoriesEn.ToList(),
         };
-    }
-
-    private void CaptureFilters(PromptLibraryPage page)
-    {
-        _sources = page.Sources;
-        _categoriesZh = page.CategoriesZh;
-        _categoriesEn = page.CategoriesEn;
     }
 
     private static bool Matches(PromptLibraryItem item, PromptLibraryQuery query)

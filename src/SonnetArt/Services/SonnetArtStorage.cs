@@ -1,15 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using SonnetArt.ImageStudio.Models;
+using SonnetArt.Models;
 using Microsoft.JSInterop;
-using System.Net;
-using System.Net.Http.Json;
 
-namespace SonnetArt.ImageStudio.Services;
+namespace SonnetArt.Services;
 
-public sealed class ImageStudioStorage
+public sealed class SonnetArtStorage
 {
-    private const string StorageKey = "cosmos.image-studio.snapshot.v1";
+    private const string StorageKey = "sonnetart.snapshot.v1";
     private const int LocalStorageFullSnapshotCharacterLimit = 4_000_000;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -19,22 +17,14 @@ public sealed class ImageStudioStorage
     };
 
     private readonly IJSRuntime _jsRuntime;
-    private readonly HttpClient _httpClient;
 
-    public ImageStudioStorage(IJSRuntime jsRuntime, HttpClient httpClient)
+    public SonnetArtStorage(IJSRuntime jsRuntime)
     {
         _jsRuntime = jsRuntime;
-        _httpClient = httpClient;
     }
 
     public async ValueTask<StudioSnapshot> LoadAsync()
     {
-        var hostSnapshot = await LoadFromHostAsync();
-        if (hostSnapshot is not null)
-        {
-            return hostSnapshot;
-        }
-
         string? json;
         try
         {
@@ -74,10 +64,6 @@ public sealed class ImageStudioStorage
     public async ValueTask SaveAsync(StudioSnapshot snapshot)
     {
         EnsureSnapshot(snapshot);
-        if (await SaveToHostAsync(snapshot))
-        {
-            return;
-        }
 
         var json = JsonSerializer.Serialize(snapshot, JsonOptions);
         if (json.Length <= LocalStorageFullSnapshotCharacterLimit &&
@@ -107,67 +93,7 @@ public sealed class ImageStudioStorage
 
     public async ValueTask ClearAsync()
     {
-        try
-        {
-            using var response = await _httpClient.DeleteAsync("api/local/snapshot");
-            if (response.IsSuccessStatusCode)
-            {
-                return;
-            }
-        }
-        catch (HttpRequestException)
-        {
-        }
-
         await TryRemoveLocalStorageAsync();
-    }
-
-    private async Task<StudioSnapshot?> LoadFromHostAsync()
-    {
-        try
-        {
-            using var response = await _httpClient.GetAsync("api/local/snapshot");
-            if (response.StatusCode == HttpStatusCode.NoContent ||
-                response.StatusCode == HttpStatusCode.NotFound)
-            {
-                return null;
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            var snapshot = await response.Content.ReadFromJsonAsync<StudioSnapshot>(JsonOptions);
-            if (snapshot is null)
-            {
-                return null;
-            }
-
-            EnsureSnapshot(snapshot);
-            return snapshot;
-        }
-        catch (HttpRequestException)
-        {
-            return null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    private async Task<bool> SaveToHostAsync(StudioSnapshot snapshot)
-    {
-        try
-        {
-            using var response = await _httpClient.PutAsJsonAsync("api/local/snapshot", snapshot, JsonOptions);
-            return response.IsSuccessStatusCode;
-        }
-        catch (HttpRequestException)
-        {
-            return false;
-        }
     }
 
     private async Task<bool> TrySaveToLocalStorageAsync(string json)

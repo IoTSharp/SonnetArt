@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 
-namespace SonnetArt.ImageStudio.Models;
+namespace SonnetArt.Models;
 
 public sealed class PromptLibraryItem
 {
