@@ -1,0 +1,1059 @@
+@page "/"
+@inject ImageStudioStorage Storage
+@inject ImageGenerationClient ImageClient
+@inject PromptChatClient ChatClient
+@inject PromptLibraryService PromptLibrary
+@inject SonnetAccountClient SonnetClient
+@inject IJSRuntime JsRuntime
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@implements IDisposable
+@using QRCoder
+
+<PageTitle>@AppName</PageTitle>
+
+<XProvider Theme="@ProviderTheme" Tokens="@ThemeTokens" Class="@RootThemeClass">
+    <div class="studio-shell">
+        <StudioTopBar Title="@AppName" Subtitle="@HeaderSubtitle" OnClose="CloseWindowAsync">
+            <button type="button" class="studio-button studio-button-light" title="我的账户" @onclick="OpenSettings">
+                <Icon Type="user" Theme="IconThemeType.Outline" />
+                <span>我的账户</span>
+            </button>
+        </StudioTopBar>
+
+        <div class="@BodyClass">
+            <aside class="graphic-sidebar">
+                <WorkspaceSidebar Items="@WorkspaceItems"
+                                  ActiveWorkspaceId="@_snapshot.ActiveWorkspaceId"
+                                  ActiveWorkspaceIdChanged="@SelectWorkspace"
+                                  OnOpenWorkspace="@OpenWorkspace"
+                                  OnNewWorkspace="@NewWorkspace"
+                                  Collapsed="@_leftSidebarCollapsed"
+                                  OnToggleCollapsed="@ToggleLeftSidebarCollapsed" />
+
+                <SessionSidebar Class="@SidebarClass"
+                                Collapsed="@_leftSidebarCollapsed"
+                                CollapsedChanged="@SetLeftSidebarCollapsed"
+                                Items="@ConversationItems"
+                                ActiveKey="@ActiveGraphicWorkspace.ActiveSessionId"
+                                ActiveKeyChanged="@ActivateSession"
+                                OnRename="@RenameSession"
+                                OnDelete="@DeleteSession"
+                                OnNewSession="@NewSession"
+                                OnClearHistory="@ClearHistory"
+                                ServerStatusClass="@ServerStatusClass"
+                                ServerStatusText="@ServerStatusText"
+                                ServerStatusTitle="@ServerStatusTitle" />
+            </aside>
+
+            <main class="studio-workspace">
+                <section class="workspace-header">
+                    <div>
+                        <span class="workspace-eyebrow">@ModeLabel</span>
+                        <h2>@ActiveSession.Title</h2>
+                        <p>@WorkspaceStatus</p>
+                    </div>
+                    <div class="workspace-actions">
+                        <button type="button" class="studio-button studio-button-light" @onclick="ToggleGallery">
+                            <Icon Type="@GalleryToggleIcon" Theme="IconThemeType.Outline" />
+                            <span>@GalleryToggleText</span>
+                        </button>
+                        <button type="button" class="studio-button studio-button-light" @onclick="ClearResults">
+                            <Icon Type="delete" Theme="IconThemeType.Outline" />
+                            <span>清空结果</span>
+                        </button>
+                    </div>
+                </section>
+
+                <section class="@CanvasClass">
+                    @if (_galleryOpen)
+                    {
+                        <div class="gallery-workspace">
+                            <div class="gallery-toolbar">
+                                <label class="gallery-search">
+                                    <Icon Type="search" Theme="IconThemeType.Outline" />
+                                    <input value="@_gallerySearch" placeholder="搜索提示词、标签或参数" @oninput="UpdateGallerySearch" />
+                                </label>
+                                <select class="studio-select" value="@_gallerySessionFilter" @onchange="UpdateGallerySessionFilter" title="会话">
+                                    <option value="all">全部会话</option>
+                                    @foreach (var session in ActiveGraphicWorkspace.Sessions.OrderByDescending(session => session.UpdatedAt))
+                                    {
+                                        <option value="@session.Id">@session.Title</option>
+                                    }
+                                </select>
+                                <select class="studio-select" value="@_galleryModelFilter" @onchange="UpdateGalleryModelFilter" title="模型">
+                                    <option value="all">全部模型</option>
+                                    @foreach (var model in GalleryModelOptions)
+                                    {
+                                        <option value="@model">@model</option>
+                                    }
+                                </select>
+                                <select class="studio-select" value="@_gallerySizeFilter" @onchange="UpdateGallerySizeFilter" title="尺寸">
+                                    <option value="all">全部尺寸</option>
+                                    @foreach (var size in GallerySizeOptions)
+                                    {
+                                        <option value="@size">@size</option>
+                                    }
+                                </select>
+                                <select class="studio-select" value="@_galleryStatusFilter" @onchange="UpdateGalleryStatusFilter" title="状态">
+                                    <option value="all">全部状态</option>
+                                    <option value="generated">已生成</option>
+                                    <option value="favorite">收藏</option>
+                                    <option value="reference">已作参考</option>
+                                    <option value="regenerated">已复现</option>
+                                </select>
+                                <select class="studio-select" value="@_galleryDateFilter" @onchange="UpdateGalleryDateFilter" title="日期">
+                                    <option value="all">全部时间</option>
+                                    <option value="today">今天</option>
+                                    <option value="week">7 天</option>
+                                    <option value="month">30 天</option>
+                                </select>
+                                <select class="studio-select" value="@_galleryTagFilter" @onchange="UpdateGalleryTagFilter" title="标签">
+                                    <option value="all">全部标签</option>
+                                    @foreach (var tag in GalleryTagOptions)
+                                    {
+                                        <option value="@tag">@tag</option>
+                                    }
+                                </select>
+                                <button type="button" class="@(_galleryFavoritesOnly ? "gallery-favorite-filter active" : "gallery-favorite-filter")" title="只看收藏" @onclick="ToggleGalleryFavoritesOnly">
+                                    <Icon Type="star" Theme="IconThemeType.Outline" />
+                                </button>
+                            </div>
+
+                            @if (FilteredGalleryImages.Count == 0)
+                            {
+                                <div class="gallery-empty">
+                                    <Icon Type="picture" Theme="IconThemeType.Outline" />
+                                    <strong>@GalleryEmptyText</strong>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="gallery-grid">
+                                    @foreach (var item in FilteredGalleryImages)
+                                    {
+                                        var image = item.Image;
+                                        <article class="gallery-item">
+                                            <button type="button" class="gallery-image-button" title="打开预览" @onclick="() => OpenImagePreview(image, item.Message.Content)">
+                                                <img src="@image.Url" alt="@item.Message.Content" />
+                                            </button>
+                                            <div class="gallery-item-body">
+                                                <header>
+                                                    <div>
+                                                        <strong>@(string.IsNullOrWhiteSpace(image.Prompt) ? item.Session.Title : image.Prompt)</strong>
+                                                        <span>@FormatImageDate(EffectiveImageCreatedAt(image, item.Message)) · @ImageModeLabel(image) · @(string.IsNullOrWhiteSpace(image.Size) ? EffectiveImageSize : image.Size)</span>
+                                                    </div>
+                                                    <button type="button" class="gallery-icon-button" title="收藏" @onclick="() => ToggleFavorite(image)">
+                                                        <Icon Type="star" Theme="@(image.IsFavorite ? IconThemeType.Fill : IconThemeType.Outline)" />
+                                                    </button>
+                                                </header>
+                                                <p>@(string.IsNullOrWhiteSpace(image.RequestSummary) ? QuickSettingsSummary : image.RequestSummary)</p>
+                                                <div class="gallery-meta">
+                                                    <span>@(string.IsNullOrWhiteSpace(image.EstimatedCost) ? EstimateCostLabel(image.RequestCount, image.ResolutionTier, image.Quality) : image.EstimatedCost)</span>
+                                                    <span>@FormatDuration(image.DurationMs)</span>
+                                                    <span>@ReferenceRoleLabel(image.ReferenceRole)</span>
+                                                    <span>@GalleryStatusLabel(GalleryImageStatus(image))</span>
+                                                </div>
+                                                <div class="gallery-actions">
+                                                    <button type="button" title="作为参考图" @onclick="() => UseImageAsReference(image, image.ReferenceRole)">
+                                                        <Icon Type="link" Theme="IconThemeType.Outline" />
+                                                    </button>
+                                                    <button type="button" title="编辑图片" @onclick="() => StartImageEdit(image)">
+                                                        <Icon Type="edit" Theme="IconThemeType.Outline" />
+                                                    </button>
+                                                    <button type="button" title="生成变化" @onclick="() => GenerateVariationFromImage(image)">
+                                                        <Icon Type="branches" Theme="IconThemeType.Outline" />
+                                                    </button>
+                                                    <button type="button" title="一键扩图" @onclick='() => OutpaintImage(image, "expand")'>
+                                                        <Icon Type="expand" Theme="IconThemeType.Outline" />
+                                                    </button>
+                                                    <button type="button" title="向右续画" @onclick='() => OutpaintImage(image, "right")'>
+                                                        <Icon Type="arrow-right" Theme="IconThemeType.Outline" />
+                                                    </button>
+                                                    <button type="button" title="复制参数再生成" @onclick="() => RegenerateFromImage(image)">
+                                                        <Icon Type="redo" Theme="IconThemeType.Outline" />
+                                                    </button>
+                                                    <button type="button" title="复制提示词" @onclick="() => CopyImagePrompt(image)">
+                                                        <Icon Type="copy" Theme="IconThemeType.Outline" />
+                                                    </button>
+                                                    <button type="button" title="复制参数 JSON" @onclick="() => CopyImageParameters(image)">
+                                                        <Icon Type="code" Theme="IconThemeType.Outline" />
+                                                    </button>
+                                                    <button type="button" title="下载" @onclick="() => DownloadImage(image)">
+                                                        <Icon Type="download" Theme="IconThemeType.Outline" />
+                                                    </button>
+                                                </div>
+                                                <input class="gallery-tags-input"
+                                                       value="@string.Join(", ", image.Tags)"
+                                                       placeholder="标签，用逗号分隔"
+                                                       @onchange="args => SetImageTags(image, args)" />
+                                            </div>
+                                        </article>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                    else if (ActiveSession.Messages.Count == 0 && !_loading)
+                    {
+                        <div class="empty-canvas">
+                            <XWelcome Title="准备开始作图"
+                                      Description="在底部输入描述，生成结果会永久保存在当前会话。"
+                                      Class="studio-welcome">
+                                <IconTemplate>
+                                    <div class="welcome-mark">
+                                        <Icon Type="picture" Theme="IconThemeType.Outline" />
+                                    </div>
+                                </IconTemplate>
+                            </XWelcome>
+                            <div class="prompt-shortcuts">
+                                @foreach (var item in _promptIdeas)
+                                {
+                                    <button type="button" @onclick="() => UsePrompt(item)">
+                                        <Icon Type="bulb" Theme="IconThemeType.Outline" />
+                                        <span>@item</span>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="playground-thread">
+                            @foreach (var message in ActiveSession.Messages)
+                            {
+                                <article class="@MessageClass(message)">
+                                    <header>
+                                        <span>@MessageRoleLabel(message.Role)</span>
+                                        <time>@message.CreatedAt.ToLocalTime().ToString("HH:mm")</time>
+                                    </header>
+
+                                    @if (ShouldShowMessageText(message))
+                                    {
+                                        <p>@message.Content</p>
+                                    }
+
+                                    @if (message.Role == PromptConfirmRole && _pendingPrompt is not null && message.Id == _pendingPrompt.MessageId)
+                                    {
+                                        <div class="prompt-confirm-actions">
+                                            <button type="button" class="studio-button studio-button-primary" disabled="@_loading" @onclick="GenerateWithPolish">
+                                                <Icon Type="highlight" Theme="IconThemeType.Outline" />
+                                                <span>润色后生成</span>
+                                            </button>
+                                            <button type="button" class="studio-button studio-button-light" disabled="@_loading" @onclick="GenerateWithoutPolish">
+                                                <Icon Type="thunderbolt" Theme="IconThemeType.Outline" />
+                                                <span>直接生成</span>
+                                            </button>
+                                            <button type="button" class="studio-button studio-button-ghost" disabled="@_loading" @onclick="GenerateWithoutPolishAndRemember">
+                                                <Icon Type="save" Theme="IconThemeType.Outline" />
+                                                <span>以后直接生成</span>
+                                            </button>
+                                            <button type="button" class="studio-button studio-button-ghost" disabled="@_loading" @onclick="GenerateWithPolishAndRemember">
+                                                <Icon Type="save" Theme="IconThemeType.Outline" />
+                                                <span>以后自动润色</span>
+                                            </button>
+                                        </div>
+                                    }
+
+                                    @if (message.Images.Count > 0)
+                                    {
+                                        <div class="result-grid message-result-grid">
+                                            @foreach (var image in message.Images)
+                                            {
+                                                <figure class="result-tile">
+                                                    <img src="@image.Url" alt="@message.Content" title="双击放大" @ondblclick="() => OpenImagePreview(image, message.Content)" />
+                                                    <figcaption>
+                                                        <span>@(string.IsNullOrWhiteSpace(image.Size) ? image.MimeType ?? Settings.Format : image.Size)</span>
+                                                        <div class="result-actions">
+                                                            <button type="button" title="作为参考图" @onclick="() => UseImageAsReference(image, image.ReferenceRole)">
+                                                                <Icon Type="link" Theme="IconThemeType.Outline" />
+                                                            </button>
+                                                            <button type="button" title="继续编辑" @onclick="() => StartImageEdit(image)">
+                                                                <Icon Type="edit" Theme="IconThemeType.Outline" />
+                                                            </button>
+                                                            <button type="button" title="扩图" @onclick='() => OutpaintImage(image, "expand")'>
+                                                                <Icon Type="expand" Theme="IconThemeType.Outline" />
+                                                            </button>
+                                                            <button type="button" title="复制参数" @onclick="() => CopyImageParameters(image)">
+                                                                <Icon Type="code" Theme="IconThemeType.Outline" />
+                                                            </button>
+                                                            <button type="button" title="下载" @onclick="() => DownloadImage(image)">
+                                                                <Icon Type="download" Theme="IconThemeType.Outline" />
+                                                            </button>
+                                                        </div>
+                                                    </figcaption>
+                                                </figure>
+                                            }
+                                        </div>
+                                    }
+                                </article>
+                            }
+
+                            @if (_loading)
+                            {
+                                <article class="thread-message system loading-message">
+                                    <div class="studio-loading inline-loading">
+                                        <span></span>
+                                        <strong>@_loadingLabel</strong>
+                                        <p>@QuickSettingsSummary · @CostAndDurationSummary</p>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    }
+                </section>
+
+                @if (!string.IsNullOrWhiteSpace(_error))
+                {
+                    <p class="studio-error">@_error</p>
+                }
+                @if (!string.IsNullOrWhiteSpace(_downloadNotice))
+                {
+                    <div class="studio-notice">
+                        <span>@_downloadNotice</span>
+                        @if (CanRevealDownloadedFile)
+                        {
+                            <button type="button" disabled="@_revealDownloadBusy" title="在文件夹中显示" @onclick="RevealLastDownload">
+                                <Icon Type="@(_revealDownloadBusy ? "loading" : "folder-open")" Theme="IconThemeType.Outline" />
+                                <span>@(_revealDownloadBusy ? "打开中" : "在文件夹中显示")</span>
+                            </button>
+                        }
+                    </div>
+                }
+
+                <section class="workspace-chat">
+                    <details class="studio-advanced chat-advanced">
+                        <summary>
+                            <span>高级</span>
+                            <div class="quick-settings" @onclick:stopPropagation @onmousedown:stopPropagation>
+                                <div class="quick-popover quick-ratio">
+                                    <button type="button"
+                                            class="quick-field quick-trigger"
+                                            title="画面比例"
+                                            aria-expanded="@_ratioMenuOpen"
+                                            @onclick="ToggleRatioMenu">
+                                        <span class="@CurrentRatioPreviewClass" aria-hidden="true"></span>
+                                        <strong>@CurrentAspectRatio.Label</strong>
+                                    </button>
+                                    @if (_ratioMenuOpen)
+                                    {
+                                        <div class="quick-menu ratio-menu">
+                                            <header>画面比例</header>
+                                            @foreach (var preset in _aspectRatioPresets)
+                                            {
+                                                <button type="button" class="@RatioOptionClass(preset)" @onclick="() => SelectAspectRatio(preset.Ratio)">
+                                                    <span class="@RatioPreviewClass(preset)" aria-hidden="true"></span>
+                                                    <span class="quick-option-copy">
+                                                        <strong>@preset.Label</strong>
+                                                        @if (!string.IsNullOrWhiteSpace(preset.Badge))
+                                                        {
+                                                            <em>@preset.Badge</em>
+                                                        }
+                                                    </span>
+                                                    @if (IsCurrentAspectRatio(preset))
+                                                    {
+                                                        <Icon Type="check" Theme="IconThemeType.Outline" />
+                                                    }
+                                                </button>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                                <div class="quick-popover quick-resolution">
+                                    <button type="button"
+                                            class="quick-field quick-trigger"
+                                            title="分辨率"
+                                            aria-expanded="@_resolutionMenuOpen"
+                                            @onclick="ToggleResolutionMenu">
+                                        <span class="quick-resolution-icon" aria-hidden="true"></span>
+                                        <strong>@CurrentResolution.Label</strong>
+                                    </button>
+                                    @if (_resolutionMenuOpen)
+                                    {
+                                        <div class="quick-menu resolution-menu">
+                                            <header>选择分辨率</header>
+                                            @foreach (var preset in AvailableResolutionPresets)
+                                            {
+                                                <button type="button" class="@ResolutionOptionClass(preset)" @onclick="() => SelectResolution(preset.Tier)">
+                                                    <span class="quick-option-copy">
+                                                        <strong>@preset.Label</strong>
+                                                        <small>@preset.Description</small>
+                                                    </span>
+                                                    @if (IsCurrentResolution(preset))
+                                                    {
+                                                        <Icon Type="check" Theme="IconThemeType.Outline" />
+                                                    }
+                                                </button>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                                <label class="quick-field">
+                                    <span>质量</span>
+                                    <select class="quick-select" value="@Settings.Quality" @onchange="UpdateQuickQuality">
+                                        @foreach (var option in CurrentQualityOptions)
+                                        {
+                                            <option value="@option">@QualityOptionLabel(option)</option>
+                                        }
+                                    </select>
+                                </label>
+                                <label class="quick-field quick-count-field">
+                                    <span>数量</span>
+                                    <input class="quick-number" type="number" min="1" max="10" value="@_count" @onchange="UpdateQuickCount" />
+                                </label>
+                                @if (CurrentModelCapabilities.SupportsOutputFormat)
+                                {
+                                    <label class="quick-field">
+                                        <span>格式</span>
+                                        <select class="quick-select" value="@Settings.Format" @onchange="UpdateQuickFormat">
+                                            @foreach (var option in CurrentFormatOptions)
+                                            {
+                                                <option value="@option">@option.ToUpperInvariant()</option>
+                                            }
+                                        </select>
+                                    </label>
+                                }
+                            </div>
+                            <small>@QuickSettingsSummary</small>
+                        </summary>
+
+                        <nav class="studio-tabs" aria-label="作图模式">
+                            <button type="button" class="@TabClass("generate")" @onclick="@(() => UpdateMode("generate"))">文生图</button>
+                            <button type="button" class="@TabClass("image")" @onclick="@(() => UpdateMode("image"))">图生图</button>
+                            <button type="button" class="@TabClass("edit")" @onclick="@(() => UpdateMode("edit"))">图片编辑</button>
+                            <button type="button" class="@TabClass("variation")" @onclick="@(() => UpdateMode("variation"))">变化</button>
+                        </nav>
+
+                        @if (ActiveSession.Mode is "image" or "edit" or "variation")
+                        {
+                            <div class="advanced-media">
+                                <label class="studio-label">@InputFileLabel</label>
+                                <InputFile class="studio-file"
+                                           accept="@InputFileAccept"
+                                           multiple="@(ActiveSession.Mode is "image" or "edit")"
+                                           OnChange="@AddReferenceFiles" />
+                                @if (_referenceFiles.Count > 0)
+                                {
+                                    <div class="reference-files">
+                                        @foreach (var file in _referenceFiles)
+                                        {
+                                            <span>@file.FileName</span>
+                                        }
+                                    </div>
+                                }
+
+                                <label class="studio-label">图片引用</label>
+                                <textarea class="studio-textarea reference-input"
+                                          placeholder="每行一个 image URL 或 file-..."
+                                          value="@ActiveSession.ImageReferences"
+                                          @oninput="UpdateReferences"></textarea>
+
+                                <label class="studio-label reference-role-label">参考角色</label>
+                                <select class="studio-select reference-role-input" value="@ActiveSession.ReferenceRole" @onchange="UpdateReferenceRole">
+                                    @foreach (var option in _referenceRoleOptions)
+                                    {
+                                        <option value="@option.Value">@option.Label</option>
+                                    }
+                                </select>
+                                <small class="studio-helper reference-role-helper">
+                                    @_referenceRoleOptions.First(option => option.Value == StudioSnapshot.NormalizeReferenceRole(ActiveSession.ReferenceRole)).Description
+                                </small>
+
+                                @if (ActiveSession.Mode == "edit")
+                                {
+                                    <label class="studio-label mask-reference-label">遮罩引用</label>
+                                    <input class="studio-input mask-reference-input"
+                                           placeholder="image URL 或 file-..."
+                                           value="@ActiveSession.MaskReference"
+                                           @onchange="UpdateMaskReference" />
+                                }
+                            </div>
+                        }
+
+                        <div class="studio-form-grid advanced-grid">
+                            <FieldSelect Label="模型" Value="@Settings.Model" Options="@_modelOptions" OnChange="@UpdateModel" HelpText="仅支持 GPT Image 2 家族" />
+                            @if (CurrentModelCapabilities.Styles.Count > 0)
+                            {
+                                <FieldSelect Label="风格" Value="@Settings.Style" Options="@CurrentStyleOptions" OnChange="@UpdateStyle" />
+                            }
+                            @if (CurrentModelCapabilities.SupportsBackground)
+                            {
+                                <FieldSelect Label="背景" Value="@Settings.Background" Options="@CurrentBackgroundOptions" OnChange="@UpdateBackground" HelpText="当前不提供透明背景" />
+                            }
+                            @if (CurrentModelCapabilities.SupportsOutputCompression && Settings.Format != "png")
+                            {
+                                <FieldNumber Label="压缩" Value="@Settings.Compression" OnChange="@UpdateCompression" Min="0" Max="100" HelpText="仅 JPEG/WebP 生效" />
+                            }
+                            @if (CurrentModelCapabilities.SupportsModeration)
+                            {
+                                <FieldSelect Label="审核" Value="@Settings.Moderation" Options="@_moderationOptions" OnChange="@UpdateModeration" />
+                            }
+                            @if (CurrentModelCapabilities.SupportsInputFidelity)
+                            {
+                                <FieldSelect Label="输入保真" Value="@Settings.InputFidelity" Options="@_fidelityOptions" OnChange="@UpdateFidelity" />
+                            }
+                            @if (CurrentModelCapabilities.SupportsStream)
+                            {
+                                <div class="studio-field request-mode-field">
+                                    <label class="studio-label">请求模式</label>
+                                    <select class="studio-select" value="@Settings.RequestMode" @onchange="UpdateRequestMode">
+                                        <option value="stream">流式</option>
+                                        <option value="sync">同步</option>
+                                    </select>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="studio-field">
+                                    <label class="studio-label">请求模式</label>
+                                    <input class="studio-input" value="同步" disabled />
+                                    <small class="studio-helper">GPT Image 2 当前不支持流式和 partial_images</small>
+                                </div>
+                            }
+                            @if (CurrentModelCapabilities.SupportsPartialImages)
+                            {
+                                <FieldNumber Label="Partial" Value="@Settings.PartialImages" OnChange="@UpdatePartial" Min="0" Max="3" />
+                            }
+                            <div class="studio-field">
+                                <label class="studio-label">用户标识</label>
+                                <input class="studio-input" placeholder="可选" value="@Settings.User" @onchange="UpdateUser" />
+                            </div>
+                        </div>
+
+                        <p class="actual-params-summary">@ActualRequestSummary</p>
+                        <p class="actual-params-summary">批量与预估：@CostAndDurationSummary；当前数量 @_count，结果会带回可复现参数。</p>
+                        <div class="matrix-controls">
+                            <button type="button" class="@MatrixPanelButtonClass" @onclick="ToggleMatrixPanel">
+                                <Icon Type="table" Theme="IconThemeType.Outline" />
+                                <span>矩阵对比</span>
+                            </button>
+                            <span>@MatrixSummary</span>
+                        </div>
+                        @if (_matrixPanelOpen)
+                        {
+                            <div class="matrix-panel">
+                                <div>
+                                    <span>分辨率</span>
+                                    <div class="matrix-chip-row">
+                                        @foreach (var option in _matrixResolutionOptions)
+                                        {
+                                            <button type="button" class="@MatrixResolutionOptionClass(option.Tier)" @onclick="() => ToggleMatrixResolution(option.Tier)">
+                                                @option.Label
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                                <div>
+                                    <span>质量</span>
+                                    <div class="matrix-chip-row">
+                                        @foreach (var option in CurrentQualityOptions.Where(option => _matrixQualityOptions.Contains(option)))
+                                        {
+                                            <button type="button" class="@MatrixQualityOptionClass(option)" @onclick="() => ToggleMatrixQuality(option)">
+                                                @QualityOptionLabel(option)
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                                <button type="button" class="studio-button studio-button-primary" disabled="@(!CanRunMatrix)" @onclick="GenerateMatrixAsync">
+                                    <Icon Type="@(_loading ? "loading" : "thunderbolt")" Theme="IconThemeType.Outline" />
+                                    <span>生成矩阵</span>
+                                </button>
+                            </div>
+                        }
+                        <p class="actual-params-summary model-capability-note">@ModelCapabilityNote</p>
+
+                        <label class="studio-label">高级 JSON</label>
+                        <textarea class="studio-textarea json-input"
+                                  placeholder='{"user": "optional-trace-id"}'
+                                  value="@Settings.AdvancedJson"
+                                  @oninput="UpdateAdvancedJson"></textarea>
+                        <small class="studio-helper advanced-json-helper">高级 JSON 只能覆盖当前模型真实支持的字段；旧模型、stream、partial_images、response_format、input_fidelity 会被忽略或归一化。</small>
+                    </details>
+
+                    <XSender @bind-Value="_senderText"
+                             Placeholder="输入作图描述，按 Enter 生成..."
+                             Loading="@_loading"
+                             Rows="2"
+                             ClearAfterSubmit="false"
+                             SubmitMode="XSenderSubmitMode.Enter"
+                             Attachments="@_senderAttachments"
+                             Accept="image/*"
+                             MaxAttachments="16"
+                             UploadText="添加图片"
+                             AttachmentsPlaceholder="选择、拖入或粘贴图片"
+                             BeforeUpload="@BeforeSenderUpload"
+                             OnFilesSelected="@AddSenderFiles"
+                             OnAttachmentRemove="@RemoveSenderAttachment"
+                             OnSubmit="@SendFromSender"
+                             OnCancel="@Cancel" />
+                </section>
+            </main>
+
+            <PromptLibraryPanel Class="@PromptPanelClass"
+                                Collapsed="@_rightPromptPanelCollapsed"
+                                CollapsedChanged="@SetRightPromptPanelCollapsed"
+                                Page="@_promptLibraryPage"
+                                IsLoading="@_promptLibraryLoading"
+                                Notice="@_promptLibraryNotice"
+                                OnQueryChanged="@LoadPromptLibraryPage"
+                                OnUse="@UsePrompt"
+                                OnCopy="@CopyPrompt" />
+        </div>
+    </div>
+
+    <WorkspaceCreateDialog Open="@_workspaceCreateOpen"
+                           WorkspaceType="@_workspaceCreateType"
+                           WorkspaceTypeChanged="@SetWorkspaceCreateType"
+                           Name="@_workspaceCreateName"
+                           NameChanged="@SetWorkspaceCreateName"
+                           RootPath="@_workspaceCreateRootPath"
+                           RootPathChanged="@SetWorkspaceCreateRootPath"
+                           OnCreate="@CreateWorkspace"
+                           OnCancel="@CloseWorkspaceCreate" />
+
+    @if (_settingsOpen)
+    {
+        <div class="settings-backdrop" @onclick="CloseSettings">
+            <section class="settings-drawer" @onclick:stopPropagation>
+                <header>
+                    <div>
+                        <span class="workspace-eyebrow">我的账户</span>
+                        <h2>余额与充值</h2>
+                    </div>
+                    <button type="button" title="关闭" @onclick="CloseSettings">
+                        <Icon Type="close" Theme="IconThemeType.Outline" />
+                    </button>
+                </header>
+
+                <section class="settings-section">
+                    <div class="account-summary account-summary-compact">
+                        <div>
+                            <span>账户</span>
+                            <strong>@AccountEmail</strong>
+                        </div>
+                        <div>
+                            <span>余额</span>
+                            <strong>@BalanceLabel</strong>
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button type="button" class="studio-button studio-button-light" disabled="@(!SonnetLoggedIn || _sonnetBusy)" @onclick="RefreshSonnetProfile">
+                            <Icon Type="reload" Theme="IconThemeType.Outline" />
+                            <span>刷新余额</span>
+                        </button>
+                        @if (HasPendingPaymentOrder)
+                        {
+                            <button type="button" class="studio-button studio-button-light" @onclick="ShowPendingPaymentOrder">
+                                <Icon Type="qrcode" Theme="IconThemeType.Outline" />
+                                <span>查看待支付订单</span>
+                            </button>
+                        }
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <div class="settings-section-title">
+                        <strong>外观</strong>
+                        <span>当前 @ThemeModeLabel(Settings.ThemeMode)</span>
+                    </div>
+
+                    <nav class="theme-segment" aria-label="界面主题">
+                        <button type="button" class="@ThemeOptionClass("system")" title="跟随系统" @onclick="@(() => UpdateThemeMode("system"))">
+                            <Icon Type="desktop" Theme="IconThemeType.Outline" />
+                            <span>系统</span>
+                        </button>
+                        <button type="button" class="@ThemeOptionClass("light")" title="浅色主题" @onclick="@(() => UpdateThemeMode("light"))">
+                            <Icon Type="bulb" Theme="IconThemeType.Outline" />
+                            <span>浅色</span>
+                        </button>
+                        <button type="button" class="@ThemeOptionClass("dark")" title="深色主题" @onclick="@(() => UpdateThemeMode("dark"))">
+                            <Icon Type="moon" Theme="IconThemeType.Outline" />
+                            <span>深色</span>
+                        </button>
+                    </nav>
+
+                    <div class="settings-divider"></div>
+
+                    <div class="settings-section-title">
+                        <strong>提示词润色</strong>
+                        <span>当前 @PromptPolishModeLabel</span>
+                    </div>
+
+                    <nav class="polish-segment" aria-label="提示词润色策略">
+                        @foreach (var option in _promptPolishOptions)
+                        {
+                            <button type="button"
+                                    class="@PromptPolishOptionClass(option.Value)"
+                                    title="@option.Description"
+                                    @onclick="@(() => UpdatePromptPolishMode(option.Value))">
+                                <span>@option.Label</span>
+                                <small>@option.Description</small>
+                            </button>
+                        }
+                    </nav>
+
+                    <div class="settings-section-title">
+                        <strong>Sonnet 代理</strong>
+                        <span>仅 sonnet.vip 接口</span>
+                    </div>
+
+                    <div class="studio-field">
+                        <label class="studio-label">代理地址</label>
+                        <input class="studio-input" autocomplete="off" placeholder="http://127.0.0.1:7890" value="@Settings.SonnetProxyUrl" @onchange="UpdateSonnetProxyUrl" />
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <div class="settings-section-title">
+                        <strong>兑换码</strong>
+                        <span>兑换余额或账户权益</span>
+                    </div>
+
+                    <div class="redeem-row">
+                        <div class="studio-field">
+                            <label class="studio-label">兑换码</label>
+                            <input class="studio-input" autocomplete="off" placeholder="输入兑换码" value="@_redeemCode" @oninput="UpdateRedeemCode" />
+                        </div>
+                        <button type="button" class="studio-button studio-button-primary" disabled="@(!SonnetLoggedIn || _sonnetBusy || string.IsNullOrWhiteSpace(_redeemCode))" @onclick="RedeemAccountCode">
+                            <Icon Type="gift" Theme="IconThemeType.Outline" />
+                            <span>兑换</span>
+                        </button>
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <div class="settings-section-title">
+                        <strong>账户充值</strong>
+                        <span>支付宝扫码</span>
+                    </div>
+
+                    <div class="recharge-row recharge-row-simple">
+                        <div class="studio-field">
+                            <label class="studio-label">充值金额</label>
+                            <input class="studio-input" type="number" min="1" step="1" value="@_rechargeAmount" @onchange="UpdateRechargeAmount" />
+                        </div>
+                        <button type="button" class="studio-button studio-button-primary" disabled="@(!SonnetLoggedIn || _sonnetBusy)" @onclick="CreateRechargeOrder">
+                            <Icon Type="credit-card" Theme="IconThemeType.Outline" />
+                            <span>生成二维码</span>
+                        </button>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(_sonnetMessage))
+                    {
+                        <p class="@SonnetMessageClass">@_sonnetMessage</p>
+                    }
+                </section>
+
+                <footer class="settings-footer">
+                    <button type="button" class="studio-button studio-button-ghost" disabled="@(!SonnetLoggedIn || _sonnetBusy)" @onclick="SignOutSonnet">
+                        <Icon Type="logout" Theme="IconThemeType.Outline" />
+                        <span>退出登录</span>
+                    </button>
+                </footer>
+            </section>
+        </div>
+    }
+
+    @if (_exitConfirmOpen)
+    {
+        <div class="confirm-backdrop" @onclick="CancelExit">
+            <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="exit-confirm-title" @onclick:stopPropagation>
+                <header>
+                    <div>
+                        <span class="workspace-eyebrow">退出 Cosmos</span>
+                        <h2 id="exit-confirm-title">确定要彻底退出吗？</h2>
+                    </div>
+                </header>
+                <p>当前窗口和后台托盘进程都会关闭，正在进行的生成任务也会停止。</p>
+                <footer>
+                    <button type="button" class="studio-button studio-button-light" @onclick="CancelExit">
+                        <span>取消</span>
+                    </button>
+                    <button type="button" class="studio-button studio-button-danger" @onclick="ConfirmExitAsync">
+                        <Icon Type="poweroff" Theme="IconThemeType.Outline" />
+                        <span>退出</span>
+                    </button>
+                </footer>
+            </section>
+        </div>
+    }
+
+    @if (_paymentOverlayOpen && _activePaymentOrder is not null)
+    {
+        <div class="payment-backdrop">
+            <section class="payment-dialog" role="dialog" aria-modal="true" aria-labelledby="payment-title">
+                <header>
+                    <div>
+                        <span class="workspace-eyebrow">支付宝支付</span>
+                        <h2 id="payment-title">@PaymentTitle</h2>
+                    </div>
+                    <button type="button" title="关闭" @onclick="ClosePaymentOverlay">
+                        <Icon Type="close" Theme="IconThemeType.Outline" />
+                    </button>
+                </header>
+
+                <div class="payment-body">
+                    @if (PaymentSucceeded)
+                    {
+                        <div class="payment-success">
+                            <Icon Type="check-circle" Theme="IconThemeType.Outline" />
+                            <strong>充值已完成</strong>
+                            <span>余额已刷新，可以继续使用。</span>
+                        </div>
+                    }
+                    else if (PaymentExpired)
+                    {
+                        <div class="payment-success payment-expired">
+                            <Icon Type="clock-circle" Theme="IconThemeType.Outline" />
+                            <strong>订单已过期</strong>
+                            <span>请重新生成支付二维码。</span>
+                        </div>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(PaymentQrImageSource))
+                    {
+                        <div class="payment-qr-frame">
+                            <img src="@PaymentQrImageSource" alt="支付宝支付二维码" />
+                        </div>
+                        <p class="payment-hint">请使用支付宝扫码完成支付。</p>
+                    }
+                    else
+                    {
+                        <div class="payment-success payment-expired">
+                            <Icon Type="info-circle" Theme="IconThemeType.Outline" />
+                            <strong>订单已创建</strong>
+                            <span>当前支付方式没有返回可展示的二维码。</span>
+                        </div>
+                    }
+
+                    <div class="payment-status">
+                        <div>
+                            <span>金额</span>
+                            <strong>@FormatMoney(_activePaymentOrder.PayAmount > 0 ? _activePaymentOrder.PayAmount : _activePaymentOrder.Amount)</strong>
+                        </div>
+                        <div>
+                            <span>状态</span>
+                            <strong>@PaymentStatusLabel</strong>
+                        </div>
+                        <div>
+                            <span>剩余时间</span>
+                            <strong>@PaymentCountdown</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <footer>
+                    @if (!PaymentSucceeded && !PaymentExpired)
+                    {
+                        <button type="button" class="studio-button studio-button-light" disabled="@_paymentPolling" @onclick="VerifyPaymentNow">
+                            <Icon Type="sync" Theme="IconThemeType.Outline" />
+                            <span>我已完成支付</span>
+                        </button>
+                        <button type="button" class="studio-button studio-button-ghost" disabled="@_paymentCancelling" @onclick="CancelPaymentOrder">
+                            <span>@(_paymentCancelling ? "取消中" : "取消订单")</span>
+                        </button>
+                    }
+                    <button type="button" class="studio-button studio-button-primary" @onclick="ClosePaymentOverlay">
+                        <span>@(PaymentSucceeded || PaymentExpired ? "完成" : "稍后查看")</span>
+                    </button>
+                </footer>
+            </section>
+        </div>
+    }
+
+    @if (_previewImage is not null)
+    {
+        <div class="image-preview-backdrop" @onclick="CloseImagePreview">
+            <section class="@ImagePreviewDialogClass" role="dialog" aria-modal="true" aria-labelledby="image-preview-title" @onclick:stopPropagation>
+                <header>
+                    <div>
+                        <span class="workspace-eyebrow">图片预览</span>
+                        <h2 id="image-preview-title">@ImagePreviewTitle</h2>
+                    </div>
+                    <div class="image-preview-actions">
+                        <button type="button" title="作为参考图" @onclick='() => UseImageAsReference(_previewImage, _previewImage?.ReferenceRole ?? "auto")'>
+                            <Icon Type="link" Theme="IconThemeType.Outline" />
+                        </button>
+                        <button type="button" title="生成变化" @onclick="() => GenerateVariationFromImage(_previewImage)">
+                            <Icon Type="branches" Theme="IconThemeType.Outline" />
+                        </button>
+                        <button type="button" title="一键扩图" @onclick='() => OutpaintImage(_previewImage, "expand")'>
+                            <Icon Type="expand" Theme="IconThemeType.Outline" />
+                        </button>
+                        <button type="button" title="向左平移" @onclick='() => OutpaintImage(_previewImage, "left")'>
+                            <Icon Type="arrow-left" Theme="IconThemeType.Outline" />
+                        </button>
+                        <button type="button" title="向右续画" @onclick='() => OutpaintImage(_previewImage, "right")'>
+                            <Icon Type="arrow-right" Theme="IconThemeType.Outline" />
+                        </button>
+                        <button type="button" title="复制参数" @onclick="() => CopyImageParameters(_previewImage)">
+                            <Icon Type="code" Theme="IconThemeType.Outline" />
+                        </button>
+                        <button type="button" class="@ImagePreviewEditButtonClass" title="@(_previewEditing ? "退出编辑" : "编辑图片")" @onclick="ToggleImagePreviewEdit">
+                            <Icon Type="edit" Theme="IconThemeType.Outline" />
+                        </button>
+                        <button type="button" title="@(_previewZoomed ? "适应窗口" : "放大查看")" @onclick="ToggleImagePreviewZoom">
+                            <Icon Type="@(_previewZoomed ? "fullscreen-exit" : "zoom-in")" Theme="IconThemeType.Outline" />
+                        </button>
+                        <button type="button" title="下载" @onclick="DownloadPreviewImage">
+                            <Icon Type="download" Theme="IconThemeType.Outline" />
+                        </button>
+                        <button type="button" title="关闭" @onclick="CloseImagePreview">
+                            <Icon Type="close" Theme="IconThemeType.Outline" />
+                        </button>
+                    </div>
+                </header>
+                <div class="image-preview-body">
+                    <div class="image-preview-frame">
+                        <div class="@ImagePreviewStageClass">
+                            <img @ref="_previewImageElement" src="@_previewImage.Url" alt="@_previewAlt" title="双击切换缩放" @ondblclick="ToggleImagePreviewZoom" @onload="OnPreviewImageLoaded" />
+                            @if (_previewEditing)
+                            {
+                                <canvas @ref="_previewMaskCanvas" class="image-preview-mask" aria-label="修改区域"></canvas>
+                            }
+                        </div>
+                    </div>
+                    @if (_previewEditing)
+                    {
+                        <aside class="image-preview-editor" aria-label="图片编辑">
+                            <header>
+                                <div>
+                                    <span class="workspace-eyebrow">编辑</span>
+                                    <h3>局部修改</h3>
+                                </div>
+                                <button type="button" title="清空标注" @onclick="ClearPreviewMask">
+                                    <Icon Type="delete" Theme="IconThemeType.Outline" />
+                                </button>
+                            </header>
+
+                            <label class="studio-label" for="preview-brush-size">画笔大小</label>
+                            <div class="image-edit-brush-row">
+                                <input id="preview-brush-size" type="range" min="12" max="96" step="2" value="@_previewBrushSize" @oninput="UpdatePreviewBrushSize" />
+                                <strong>@_previewBrushSize</strong>
+                            </div>
+
+                            <label class="studio-label" for="preview-edit-prompt">修改提示词</label>
+                            <textarea id="preview-edit-prompt"
+                                      class="studio-textarea image-edit-prompt"
+                                      placeholder="把标注区域改成..."
+                                      value="@_previewEditPrompt"
+                                      @oninput="UpdatePreviewEditPrompt"></textarea>
+
+                            @if (!string.IsNullOrWhiteSpace(_previewEditError))
+                            {
+                                <p class="image-edit-error">@_previewEditError</p>
+                            }
+
+                            <footer>
+                                <button type="button" class="studio-button studio-button-light" @onclick="ClearPreviewMask">
+                                    <Icon Type="delete" Theme="IconThemeType.Outline" />
+                                    <span>清空标注</span>
+                                </button>
+                                <button type="button" class="studio-button studio-button-primary" disabled="@PreviewEditSubmitDisabled" @onclick="SubmitPreviewEdit">
+                                    <Icon Type="@(_loading ? "loading" : "highlight")" Theme="IconThemeType.Outline" />
+                                    <span>@(_loading ? "生成中" : "修改图片")</span>
+                                </button>
+                            </footer>
+                        </aside>
+                    }
+                </div>
+            </section>
+        </div>
+    }
+
+    @if (RequiresAuthOverlay)
+    {
+        <div class="auth-backdrop">
+            <section class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+                <div class="auth-brand">
+                    <div class="studio-logo" aria-hidden="true">
+                        <span class="studio-logo-orbit studio-logo-orbit-one"></span>
+                        <span class="studio-logo-orbit studio-logo-orbit-two"></span>
+                        <span class="studio-logo-core"></span>
+                        <span class="studio-logo-spark"></span>
+                    </div>
+                    <div>
+                        <span>@AppName</span>
+                        <h2 id="auth-title">@(_sonnetRegisterOpen ? "创建账户" : "登录账户")</h2>
+                    </div>
+                </div>
+
+                <div class="auth-tabs" role="tablist">
+                    <button type="button" class="@AuthTabClass(false)" @onclick="@(() => SetAuthMode(false))">登录</button>
+                    <button type="button" class="@AuthTabClass(true)" @onclick="@(() => SetAuthMode(true))">注册</button>
+                </div>
+
+                <div class="studio-form-grid account-grid auth-grid">
+                    <div class="studio-field">
+                        <label class="studio-label">邮箱</label>
+                        <input class="studio-input" type="email" autocomplete="username" value="@_sonnetEmail" @oninput="UpdateSonnetEmail" />
+                    </div>
+                    <div class="studio-field">
+                        <label class="studio-label">密码</label>
+                        <input class="studio-input" type="password" autocomplete="@(_sonnetRegisterOpen ? "new-password" : "current-password")" value="@_sonnetPassword" @oninput="UpdateSonnetPassword" />
+                    </div>
+                </div>
+
+                <button type="button" class="auth-proxy-link" @onclick="OpenAuthProxySettings">
+                    <Icon Type="global" Theme="IconThemeType.Outline" />
+                    <span>代理设置</span>
+                    @if (!string.IsNullOrWhiteSpace(Settings.SonnetProxyUrl))
+                    {
+                        <strong>已启用</strong>
+                    }
+                </button>
+
+                @if (_sonnetRegisterOpen)
+                {
+                    <div class="studio-form-grid account-grid auth-grid">
+                        <div class="studio-field">
+                            <label class="studio-label">优惠码</label>
+                            <input class="studio-input" value="@_sonnetPromoCode" @oninput="UpdateSonnetPromoCode" />
+                        </div>
+                        <div class="studio-field">
+                            <label class="studio-label">邀请码</label>
+                            <input class="studio-input" value="@_sonnetInvitationCode" @oninput="UpdateSonnetInvitationCode" />
+                        </div>
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_sonnetMessage))
+                {
+                    <p class="@SonnetMessageClass">@_sonnetMessage</p>
+                }
+
+                <button type="button" class="studio-button studio-button-primary auth-submit" disabled="@_sonnetBusy" @onclick="SubmitAuth">
+                    <Icon Type="@(_sonnetBusy ? "loading" : _sonnetRegisterOpen ? "user-add" : "login")" Theme="IconThemeType.Outline" />
+                    <span>@AuthButtonText</span>
+                </button>
+            </section>
+
+            @if (_authProxyOpen)
+            {
+                <section class="auth-proxy-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-proxy-title" @onclick:stopPropagation>
+                    <header>
+                        <div>
+                            <span class="workspace-eyebrow">连接设置</span>
+                            <h2 id="auth-proxy-title">Sonnet 代理</h2>
+                        </div>
+                        <button type="button" title="关闭" @onclick="CloseAuthProxySettings">
+                            <Icon Type="close" Theme="IconThemeType.Outline" />
+                        </button>
+                    </header>
+
+                    <div class="studio-field">
+                        <label class="studio-label">代理地址</label>
+                        <input class="studio-input" autocomplete="off" placeholder="http://127.0.0.1:7890" value="@Settings.SonnetProxyUrl" @onchange="UpdateSonnetProxyUrl" />
+                    </div>
+
+                    <footer>
+                        <button type="button" class="studio-button studio-button-light" @onclick="CloseAuthProxySettings">
+                            <span>完成</span>
+                        </button>
+                    </footer>
+                </section>
+            }
+        </div>
+    }
+</XProvider>
+

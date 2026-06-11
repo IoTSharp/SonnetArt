@@ -1,0 +1,91 @@
+@if (Open)
+{
+    <div class="workspace-create-backdrop" @onclick="Cancel">
+        <section class="workspace-create-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-create-title" @onclick:stopPropagation>
+            <header>
+                <div>
+                    <span class="workspace-eyebrow">工作空间</span>
+                    <h2 id="workspace-create-title">新建工作空间</h2>
+                </div>
+                <button type="button" title="关闭" @onclick="Cancel">
+                    <Icon Type="close" Theme="IconThemeType.Outline" />
+                </button>
+            </header>
+
+            <nav class="workspace-type-segment" aria-label="工作空间类型">
+                <button type="button" class="@TypeButtonClass(StudioWorkspaceTypes.GraphicDesign)" @onclick="@(() => SetType(StudioWorkspaceTypes.GraphicDesign))">
+                    <Icon Type="picture" Theme="IconThemeType.Outline" />
+                    <span>平面设计</span>
+                </button>
+                <button type="button" class="@TypeButtonClass(StudioWorkspaceTypes.PrototypeDesign)" @onclick="@(() => SetType(StudioWorkspaceTypes.PrototypeDesign))">
+                    <Icon Type="layout" Theme="IconThemeType.Outline" />
+                    <span>原型设计</span>
+                </button>
+            </nav>
+
+            <div class="studio-field">
+                <label class="studio-label">名称</label>
+                <input class="studio-input" autocomplete="off" value="@Name" @oninput="UpdateName" />
+            </div>
+
+            <div class="studio-field">
+                <label class="studio-label">目录</label>
+                <input class="studio-input mono" autocomplete="off" placeholder="输入本地目录路径" value="@RootPath" @oninput="UpdateRootPath" />
+            </div>
+
+            <footer>
+                <button type="button" class="studio-button studio-button-light" @onclick="Cancel">
+                    <span>取消</span>
+                </button>
+                <button type="button" class="studio-button studio-button-primary" @onclick="Create">
+                    <Icon Type="plus" Theme="IconThemeType.Outline" />
+                    <span>创建</span>
+                </button>
+            </footer>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public string WorkspaceType { get; set; } = StudioWorkspaceTypes.PrototypeDesign;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string RootPath { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> WorkspaceTypeChanged { get; set; }
+    [Parameter] public EventCallback<string> NameChanged { get; set; }
+    [Parameter] public EventCallback<string> RootPathChanged { get; set; }
+    [Parameter] public EventCallback OnCreate { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string TypeButtonClass(string type)
+    {
+        return StudioWorkspaceTypes.Normalize(WorkspaceType) == StudioWorkspaceTypes.Normalize(type)
+            ? "active"
+            : string.Empty;
+    }
+
+    private Task SetType(string type)
+    {
+        return WorkspaceTypeChanged.InvokeAsync(StudioWorkspaceTypes.Normalize(type));
+    }
+
+    private Task UpdateName(ChangeEventArgs args)
+    {
+        return NameChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+    }
+
+    private Task UpdateRootPath(ChangeEventArgs args)
+    {
+        return RootPathChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+    }
+
+    private Task Create()
+    {
+        return OnCreate.InvokeAsync();
+    }
+
+    private Task Cancel()
+    {
+        return OnCancel.InvokeAsync();
+    }
+}

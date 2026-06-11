@@ -1,0 +1,23 @@
+<div class="studio-field">
+    <label class="studio-label">@Label</label>
+    <input class="studio-input" type="number" min="@Min" max="@Max" value="@Value" @onchange="HandleChange" />
+    @if (!string.IsNullOrWhiteSpace(HelpText))
+    {
+        <small class="studio-helper">@HelpText</small>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public int Value { get; set; }
+    [Parameter] public int Min { get; set; }
+    [Parameter] public int Max { get; set; } = 100;
+    [Parameter] public string HelpText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<int> OnChange { get; set; }
+
+    private Task HandleChange(ChangeEventArgs args)
+    {
+        var parsed = int.TryParse(args.Value?.ToString(), out var value) ? value : Value;
+        return OnChange.InvokeAsync(Math.Clamp(parsed, Min, Max));
+    }
+}

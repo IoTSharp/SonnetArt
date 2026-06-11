@@ -1,0 +1,26 @@
+<div class="studio-field">
+    <label class="studio-label">@Label</label>
+    <select class="studio-select" value="@Value" @onchange="HandleChange">
+        @foreach (var option in Options)
+        {
+            <option value="@option">@option</option>
+        }
+    </select>
+    @if (!string.IsNullOrWhiteSpace(HelpText))
+    {
+        <small class="studio-helper">@HelpText</small>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public IReadOnlyList<string> Options { get; set; } = Array.Empty<string>();
+    [Parameter] public string HelpText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> OnChange { get; set; }
+
+    private Task HandleChange(ChangeEventArgs args)
+    {
+        return OnChange.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+    }
+}

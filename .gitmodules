@@ -1,0 +1,3 @@
+[submodule "external/AntDesignXBlazor"]
+	path = external/AntDesignXBlazor
+	url = https://github.com/IoTSharp/AntDesignXBlazor.git

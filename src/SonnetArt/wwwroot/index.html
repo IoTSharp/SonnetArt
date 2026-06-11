@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-cosmos-theme="light">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cosmos</title>
+    <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <link rel="stylesheet" href="_content/AntDesign/css/ant-design-blazor.css" />
+    <link rel="stylesheet" href="_content/AntDesign.X.Blazor/css/antdesign-x.css" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="alternate icon" type="image/png" href="favicon.png" />
+    <link href="SonnetArt.ImageStudio.styles.css" rel="stylesheet" />
+    <script type="importmap"></script>
+    <script>
+        (() => {
+            const theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+            document.documentElement.dataset.cosmosTheme = theme;
+            document.documentElement.style.colorScheme = theme;
+        })();
+    </script>
+</head>
+
+<body>
+    <div id="app">
+        <svg class="loading-progress">
+            <circle r="40%" cx="50%" cy="50%" />
+            <circle r="40%" cx="50%" cy="50%" />
+        </svg>
+        <div class="loading-progress-text"></div>
+    </div>
+
+    <div id="blazor-error-ui">
+        应用发生了未处理错误。
+        <a href="." class="reload">重新加载</a>
+        <span class="dismiss">x</span>
+    </div>
+    <script src="_content/AntDesign/js/ant-design-blazor.js"></script>
+    <script src="js/image-studio.js"></script>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+</body>
+
+</html>

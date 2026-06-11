@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <NativeWebHostRoot>$(MSBuildThisFileDirectory)external\NativeWebHost\</NativeWebHostRoot>
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)\bin\**;$(MSBuildProjectDirectory)\obj\**;$(MSBuildProjectDirectory)\artifacts\**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

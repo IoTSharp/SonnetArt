@@ -1,0 +1,7 @@
+<Project>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'NativeWebHost' and '$(EnableNativeWebHostAndroid)' != 'true' and '$(TargetFramework)' == ''">
+    <TargetFrameworks>net10.0</TargetFrameworks>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,60 @@
+@inject IJSRuntime JsRuntime
+
+<header class="studio-topbar" native-web-drag>
+    <div class="studio-brand">
+        <div class="studio-logo" aria-hidden="true">
+            <span class="studio-logo-orbit studio-logo-orbit-one"></span>
+            <span class="studio-logo-orbit studio-logo-orbit-two"></span>
+            <span class="studio-logo-core"></span>
+            <span class="studio-logo-spark"></span>
+        </div>
+        <div>
+            <h1>@Title</h1>
+            <p>@Subtitle</p>
+        </div>
+    </div>
+
+    <div class="studio-topbar-actions" native-web-no-drag>
+        @ChildContent
+        <div class="window-controls" aria-label="窗口控制">
+            <button type="button" class="window-control" title="最小化" aria-label="最小化" @onclick="@(() => InvokeWindowCommandAsync("minimize"))">
+                <Icon Type="minus" Theme="IconThemeType.Outline" />
+            </button>
+            <button type="button" class="window-control" title="最大化或还原" aria-label="最大化或还原" @onclick="@(() => InvokeWindowCommandAsync("maximize"))">
+                <Icon Type="border" Theme="IconThemeType.Outline" />
+            </button>
+            <button type="button" class="window-control window-control-close" title="退出" aria-label="退出" @onclick="CloseAsync">
+                <Icon Type="close" Theme="IconThemeType.Outline" />
+            </button>
+        </div>
+    </div>
+</header>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Cosmos";
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private async Task CloseAsync()
+    {
+        if (OnClose.HasDelegate)
+        {
+            await OnClose.InvokeAsync();
+            return;
+        }
+
+        await InvokeWindowCommandAsync("exit");
+    }
+
+    private async Task InvokeWindowCommandAsync(string command)
+    {
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("imageStudio.window.invoke", command);
+        }
+        catch (JSException)
+        {
+        }
+    }
+}

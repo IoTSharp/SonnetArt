@@ -1,0 +1,69 @@
+<aside class="@ClassName" aria-label="工作空间">
+    <header>
+        <span>工作空间</span>
+        <div class="workspace-rail-actions">
+            <button type="button" title="新建工作空间" @onclick="OnNewWorkspace">
+                <Icon Type="plus" Theme="IconThemeType.Outline" />
+            </button>
+            @if (OnToggleCollapsed.HasDelegate)
+            {
+                <button type="button" title="@ToggleTitle" @onclick="OnToggleCollapsed">
+                    <Icon Type="@ToggleIcon" Theme="IconThemeType.Outline" />
+                </button>
+            }
+        </div>
+    </header>
+
+    @if (!Collapsed)
+    {
+        <div class="workspace-list">
+            @foreach (var item in Items)
+            {
+                <button type="button"
+                        class="@ItemClass(item)"
+                        title="@item.Title"
+                        @onclick="() => SelectWorkspace(item.Id)"
+                        @ondblclick="() => OpenWorkspace(item.Id)">
+                    <span class="workspace-icon">
+                        <Icon Type="@item.Icon" Theme="IconThemeType.Outline" />
+                    </span>
+                    <span class="workspace-copy">
+                        <strong>@item.Title</strong>
+                        <small>@item.Description</small>
+                    </span>
+                </button>
+            }
+        </div>
+    }
+</aside>
+
+@code {
+    [Parameter] public IReadOnlyList<WorkspaceSidebarItem> Items { get; set; } = [];
+    [Parameter] public string? ActiveWorkspaceId { get; set; }
+    [Parameter] public bool Collapsed { get; set; }
+    [Parameter] public EventCallback<string> ActiveWorkspaceIdChanged { get; set; }
+    [Parameter] public EventCallback<string> OnOpenWorkspace { get; set; }
+    [Parameter] public EventCallback OnNewWorkspace { get; set; }
+    [Parameter] public EventCallback OnToggleCollapsed { get; set; }
+
+    private string ClassName => Collapsed ? "workspace-rail is-collapsed" : "workspace-rail";
+    private string ToggleIcon => Collapsed ? "menu-unfold" : "menu-fold";
+    private string ToggleTitle => Collapsed ? "展开会话" : "折叠会话";
+
+    private string ItemClass(WorkspaceSidebarItem item)
+    {
+        return string.Equals(item.Id, ActiveWorkspaceId, StringComparison.Ordinal)
+            ? "workspace-item active"
+            : "workspace-item";
+    }
+
+    private Task SelectWorkspace(string workspaceId)
+    {
+        return ActiveWorkspaceIdChanged.InvokeAsync(workspaceId);
+    }
+
+    private Task OpenWorkspace(string workspaceId)
+    {
+        return OnOpenWorkspace.InvokeAsync(workspaceId);
+    }
+}

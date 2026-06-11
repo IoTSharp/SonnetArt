@@ -1,0 +1,20 @@
+<div class="studio-field">
+    <label class="studio-label">@Label</label>
+    <input class="studio-input" value="@Value" @onchange="HandleChange" />
+    @if (!string.IsNullOrWhiteSpace(HelpText))
+    {
+        <small class="studio-helper">@HelpText</small>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public string HelpText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> OnChange { get; set; }
+
+    private Task HandleChange(ChangeEventArgs args)
+    {
+        return OnChange.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+    }
+}

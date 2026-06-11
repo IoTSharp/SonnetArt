@@ -1,0 +1,262 @@
+<aside class="@Class" aria-label="提示词仓库">
+    @if (Collapsed)
+    {
+        <button type="button" class="panel-rail-button" title="展开提示词仓库" @onclick="ToggleCollapsed">
+            <Icon Type="search" Theme="IconThemeType.Outline" />
+            <span class="sr-only">展开提示词仓库</span>
+        </button>
+        <span class="prompt-rail-count">@CountLabel</span>
+    }
+    else
+    {
+        <section class="studio-panel prompt-library-panel">
+            <header class="prompt-library-header">
+                <div>
+                    <span class="workspace-eyebrow">Prompt Library</span>
+                    <h2>提示词仓库</h2>
+                    <p>当前 @CountLabel 条结果</p>
+                </div>
+                <button type="button" title="折叠提示词仓库" @onclick="ToggleCollapsed">
+                    <Icon Type="menu-unfold" Theme="IconThemeType.Outline" />
+                </button>
+            </header>
+
+            <div class="prompt-language-switch" role="group" aria-label="提示词语言">
+                <button type="button" class="@LanguageClass(PromptLibraryLanguage.Chinese)" @onclick="() => SetLanguage(PromptLibraryLanguage.Chinese)">
+                    中文
+                </button>
+                <button type="button" class="@LanguageClass(PromptLibraryLanguage.English)" @onclick="() => SetLanguage(PromptLibraryLanguage.English)">
+                    English
+                </button>
+            </div>
+
+            <div class="prompt-search-box">
+                <Icon Type="search" Theme="IconThemeType.Outline" />
+                <input class="studio-input"
+                       placeholder="搜索标题、分类、来源、作者或提示词"
+                       value="@_search"
+                       @oninput="UpdateSearch" />
+                @if (!string.IsNullOrWhiteSpace(_search))
+                {
+                    <button type="button" title="清空搜索" @onclick="ClearSearch">
+                        <Icon Type="clear" Theme="IconThemeType.Outline" />
+                    </button>
+                }
+            </div>
+
+            <nav class="prompt-filter-row" aria-label="提示词来源">
+                @foreach (var source in SourceFilters)
+                {
+                    <button type="button" class="@SourceClass(source)" @onclick="() => SetSource(source)">
+                        @source
+                    </button>
+                }
+            </nav>
+
+            <nav class="prompt-filter-row prompt-category-row" aria-label="提示词分类">
+                @foreach (var category in CategoryFilters)
+                {
+                    <button type="button" class="@CategoryClass(category)" @onclick="() => SetCategory(category)">
+                        @category
+                    </button>
+                }
+            </nav>
+
+            <div class="prompt-library-meta">
+                <span>@Page.Total 条结果 · 第 @Page.Page / @PageCountLabel 页</span>
+                @if (!string.IsNullOrWhiteSpace(Notice))
+                {
+                    <strong>@Notice</strong>
+                }
+                else if (IsLoading)
+                {
+                    <strong>加载中...</strong>
+                }
+            </div>
+
+            <div class="prompt-list">
+                @if (Page.Items.Count == 0)
+                {
+                    <div class="prompt-empty">
+                        <Icon Type="search" Theme="IconThemeType.Outline" />
+                        <span>@(IsLoading ? "正在加载提示词" : "没有匹配的提示词")</span>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var item in Page.Items)
+                    {
+                        var title = item.GetTitle(_language);
+                        var category = item.GetCategory(_language);
+                        var description = item.GetDescription(_language);
+                        var prompt = item.GetPrompt(_language);
+                        <article class="prompt-card">
+                            <header>
+                                <div>
+                                    <strong title="@title">@title</strong>
+                                    <span>@item.Source · @category</span>
+                                </div>
+                                @if (IsLinkable(item.SourceUrl))
+                                {
+                                    <a href="@item.SourceUrl" target="_blank" rel="noopener" title="打开来源">
+                                        <Icon Type="link" Theme="IconThemeType.Outline" />
+                                    </a>
+                                }
+                            </header>
+                            @if (!string.IsNullOrWhiteSpace(description))
+                            {
+                                <p>@description</p>
+                            }
+                            <div class="prompt-card-tags">
+                                @if (!string.IsNullOrWhiteSpace(item.Author))
+                                {
+                                    <span>@item.Author</span>
+                                }
+                                @if (item.NeedsReferenceImages)
+                                {
+                                    <span>需参考图</span>
+                                }
+                            </div>
+                            <details>
+                                <summary>查看提示词</summary>
+                                <pre>@prompt</pre>
+                            </details>
+                            <div class="prompt-card-actions">
+                                <button type="button" class="studio-button studio-button-primary" @onclick="() => UseItem(item, prompt)">
+                                    <Icon Type="select" Theme="IconThemeType.Outline" />
+                                    <span>使用</span>
+                                </button>
+                                <button type="button" class="studio-button studio-button-light" @onclick="() => CopyItem(item, prompt)">
+                                    <Icon Type="copy" Theme="IconThemeType.Outline" />
+                                    <span>复制</span>
+                                </button>
+                            </div>
+                        </article>
+                    }
+                }
+            </div>
+
+            <footer class="prompt-pagination" aria-label="提示词分页">
+                <button type="button" title="上一页" disabled="@(!CanGoPrevious || IsLoading)" @onclick="PreviousPage">
+                    <Icon Type="left" Theme="IconThemeType.Outline" />
+                </button>
+                <span>@Page.Page / @PageCountLabel</span>
+                <button type="button" title="下一页" disabled="@(!CanGoNext || IsLoading)" @onclick="NextPage">
+                    <Icon Type="right" Theme="IconThemeType.Outline" />
+                </button>
+            </footer>
+        </section>
+    }
+</aside>
+
+@code {
+    private const string AllFilter = "全部";
+    private const int PageSize = 20;
+
+    private string _search = string.Empty;
+    private string _sourceFilter = AllFilter;
+    private string _categoryFilter = AllFilter;
+    private PromptLibraryLanguage _language = PromptLibraryLanguage.Chinese;
+
+    [Parameter] public string Class { get; set; } = "prompt-sidebar";
+    [Parameter] public bool Collapsed { get; set; }
+    [Parameter] public EventCallback<bool> CollapsedChanged { get; set; }
+    [Parameter] public PromptLibraryPage Page { get; set; } = PromptLibraryPage.Empty(PageSize);
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public string? Notice { get; set; }
+    [Parameter] public EventCallback<PromptLibraryQuery> OnQueryChanged { get; set; }
+    [Parameter] public EventCallback<PromptLibrarySelection> OnUse { get; set; }
+    [Parameter] public EventCallback<PromptLibrarySelection> OnCopy { get; set; }
+
+    private IReadOnlyList<string> SourceFilters =>
+        new[] { AllFilter }
+            .Concat(Page.Sources)
+            .ToArray();
+
+    private IReadOnlyList<string> CategoryFilters =>
+        new[] { AllFilter }
+            .Concat(_language == PromptLibraryLanguage.Chinese ? Page.CategoriesZh : Page.CategoriesEn)
+            .Take(36)
+            .ToArray();
+
+    private int PageCount => Math.Max(1, Page.Pages);
+    private string PageCountLabel => PageCount.ToString();
+    private string CountLabel => Page.Total >= 1000 ? $"{Page.Total / 1000.0:0.#}k" : Page.Total.ToString();
+    private bool CanGoPrevious => Page.Page > 1;
+    private bool CanGoNext => Page.Page < PageCount;
+
+    private Task ToggleCollapsed()
+    {
+        return CollapsedChanged.InvokeAsync(!Collapsed);
+    }
+
+    private async Task UpdateSearch(ChangeEventArgs args)
+    {
+        _search = args.Value?.ToString() ?? string.Empty;
+        await QueryPage(1);
+    }
+
+    private async Task ClearSearch()
+    {
+        _search = string.Empty;
+        await QueryPage(1);
+    }
+
+    private async Task SetSource(string source)
+    {
+        _sourceFilter = source;
+        await QueryPage(1);
+    }
+
+    private async Task SetCategory(string category)
+    {
+        _categoryFilter = category;
+        await QueryPage(1);
+    }
+
+    private string SourceClass(string source) => source == _sourceFilter ? "active" : string.Empty;
+    private string CategoryClass(string category) => category == _categoryFilter ? "active" : string.Empty;
+    private string LanguageClass(PromptLibraryLanguage language) => language == _language ? "active" : string.Empty;
+
+    private async Task SetLanguage(PromptLibraryLanguage language)
+    {
+        _language = language;
+        _categoryFilter = AllFilter;
+        await QueryPage(1);
+    }
+
+    private Task UseItem(PromptLibraryItem item, string prompt)
+    {
+        return OnUse.InvokeAsync(new PromptLibrarySelection(item, _language, prompt));
+    }
+
+    private Task CopyItem(PromptLibraryItem item, string prompt)
+    {
+        return OnCopy.InvokeAsync(new PromptLibrarySelection(item, _language, prompt));
+    }
+
+    private static bool IsLinkable(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private Task PreviousPage()
+    {
+        return QueryPage(Page.Page - 1);
+    }
+
+    private Task NextPage()
+    {
+        return QueryPage(Page.Page + 1);
+    }
+
+    private Task QueryPage(int page)
+    {
+        return OnQueryChanged.InvokeAsync(new PromptLibraryQuery(
+            Math.Clamp(page, 1, PageCount),
+            PageSize,
+            _language,
+            _sourceFilter == AllFilter ? null : _sourceFilter,
+            _categoryFilter == AllFilter ? null : _categoryFilter,
+            string.IsNullOrWhiteSpace(_search) ? null : _search.Trim()));
+    }
+}
