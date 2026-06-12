@@ -15,6 +15,8 @@ public sealed class EmbeddedLaunchContext
 {
     public long? UserId { get; init; }
     public string? AccessToken { get; init; }
+    public string? RefreshToken { get; init; }
+    public int? ExpiresIn { get; init; }
     public string? Theme { get; init; }
     public string? Language { get; init; }
     public string? UiMode { get; init; }
@@ -23,4 +25,7 @@ public sealed class EmbeddedLaunchContext
 
     [JsonIgnore]
     public bool IsEmbedded => string.Equals(UiMode, "embedded", StringComparison.OrdinalIgnoreCase);
+
+    [JsonIgnore]
+    public bool HasCredentials => !string.IsNullOrWhiteSpace(AccessToken);
 }

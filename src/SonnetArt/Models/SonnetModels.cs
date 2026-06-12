@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Text.Json;
 
 namespace SonnetArt.Models;
 
@@ -37,6 +38,10 @@ public sealed class SonnetGroup
     [JsonPropertyName("platform")] public string Platform { get; set; } = string.Empty;
     [JsonPropertyName("status")] public string Status { get; set; } = string.Empty;
     [JsonPropertyName("subscription_type")] public string SubscriptionType { get; set; } = string.Empty;
+    [JsonPropertyName("allow_image_generation")] public bool? AllowImageGeneration { get; set; }
+    [JsonPropertyName("supported_model_scopes")] public JsonElement SupportedModelScopes { get; set; }
+    [JsonPropertyName("models_list_config")] public JsonElement ModelsListConfig { get; set; }
+    [JsonPropertyName("default_mapped_model")] public string DefaultMappedModel { get; set; } = string.Empty;
 }
 
 public sealed class SonnetApiKey

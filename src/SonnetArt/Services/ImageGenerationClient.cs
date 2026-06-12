@@ -89,8 +89,16 @@ public sealed class ImageGenerationClient
         var raw = rawBuilder.ToString();
         if (!response.IsSuccessStatusCode)
         {
+            var errorMessage = ExtractErrorMessage(raw);
+            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden &&
+                IsImagePermissionError(errorMessage))
+            {
+                throw new HttpRequestException(
+                    $"图像接口返回 403 Forbidden: 当前作图 API Key 所属分组未启用图像生成权限。请在 sub2api 后台为该分组开启 gpt-image-2/images 权限，或删除当前 SonnetArt Image Key 后重新登录以生成到正确的图像分组。原始错误：{errorMessage}。{BuildErrorContext(studioRequest, endpointPath)}");
+            }
+
             throw new HttpRequestException(
-                $"图像接口返回 {(int)response.StatusCode} {response.ReasonPhrase}: {ExtractErrorMessage(raw)}。{BuildErrorContext(studioRequest, endpointPath)}");
+                $"图像接口返回 {(int)response.StatusCode} {response.ReasonPhrase}: {errorMessage}。{BuildErrorContext(studioRequest, endpointPath)}");
         }
 
         return new StudioImageResult(images, raw);
@@ -992,6 +1000,13 @@ public sealed class ImageGenerationClient
         return value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text)
             ? text.Trim()
             : null;
+    }
+
+    private static bool IsImagePermissionError(string message)
+    {
+        return message.Contains("Image generation is not enabled for this group", StringComparison.OrdinalIgnoreCase) ||
+            (message.Contains("permission_error", StringComparison.OrdinalIgnoreCase) &&
+            message.Contains("image", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? NullIfEmpty(string? value)

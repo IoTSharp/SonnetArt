@@ -1,0 +1,13 @@
+FROM caddy:2-alpine
+WORKDIR /srv
+
+COPY wwwroot/ /srv/
+COPY Caddyfile.template /etc/caddy/Caddyfile.template
+COPY docker-entrypoint.sh /usr/local/bin/sonnetart-entrypoint
+
+RUN chmod +x /usr/local/bin/sonnetart-entrypoint
+
+ENV SONNET_ART_PUBLIC_ORIGIN=:8080
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/sonnetart-entrypoint"]

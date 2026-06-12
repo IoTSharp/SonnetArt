@@ -149,6 +149,13 @@ public sealed class SonnetAccountClient
         await EnsureTokenAsync(settings, cancellationToken);
         var groups = await GetAvailableGroupsAsync(settings, cancellationToken);
         var group = ResolveSonnetArtGroup(groups);
+        if (group is null)
+        {
+            ClearImageApiKey(settings);
+            throw new InvalidOperationException(
+                "没有找到已启用的图像生成分组。请在 sub2api 后台创建或启用包含 gpt-image/image/图片 标识的分组，并为该分组开启图像生成权限。");
+        }
+
         var keys = await ListApiKeysAsync(settings, SonnetArtKeySearch, cancellationToken: cancellationToken);
         var existing = keys.Items
             .Where(IsUsableKey)
@@ -583,6 +590,15 @@ public sealed class SonnetAccountClient
         settings.BaseUrl = StudioSettings.DefaultBaseUrl;
     }
 
+    private static void ClearImageApiKey(StudioSettings settings)
+    {
+        settings.ImageApiKey = string.Empty;
+        settings.SonnetApiKeyId = null;
+        settings.SonnetApiKeyName = string.Empty;
+        settings.SonnetGroupId = null;
+        settings.SonnetGroupName = string.Empty;
+    }
+
     private static void ApplyOpenAiApiKey(StudioSettings settings, SonnetApiKey key, SonnetGroup? group)
     {
         settings.OpenAiApiKey = key.Key;
@@ -630,15 +646,10 @@ public sealed class SonnetAccountClient
     {
         return groups.FirstOrDefault(group =>
                 IsActiveGroup(group) &&
-                IsImageGroup(group))
+                HasGptImage2Capability(group))
             ?? groups.FirstOrDefault(group =>
-                group.Name.Equals(SonnetArtKeyName, StringComparison.OrdinalIgnoreCase) &&
-                IsActiveGroup(group))
-            ?? groups.FirstOrDefault(group =>
-                string.Equals(group.Platform, "openai", StringComparison.OrdinalIgnoreCase) &&
-                IsActiveGroup(group))
-            ?? groups.FirstOrDefault(group =>
-                IsActiveGroup(group));
+                IsActiveGroup(group) &&
+                IsImageGroup(group));
     }
 
     private static SonnetGroup? ResolveOpenAiGroup(IReadOnlyList<SonnetGroup> groups)
@@ -681,9 +692,47 @@ public sealed class SonnetAccountClient
     private static bool IsImageGroup(SonnetGroup? group)
     {
         return group is not null &&
-            (IsImageLabel(group.Name) ||
+            (HasImageGenerationCapability(group) ||
+            IsImageLabel(group.Name) ||
             IsImageLabel(group.Platform) ||
             IsImageLabel(group.Description));
+    }
+
+    private static bool HasGptImage2Capability(SonnetGroup? group)
+    {
+        return group is not null &&
+            HasImageGenerationCapability(group) &&
+            SupportsGptImage2(group);
+    }
+
+    private static bool HasImageGenerationCapability(SonnetGroup group)
+    {
+        return group.AllowImageGeneration == true ||
+            JsonArrayContains(group.SupportedModelScopes, "gpt_image") ||
+            JsonArrayContains(group.SupportedModelScopes, "openai_image") ||
+            JsonArrayContains(group.SupportedModelScopes, "image_generation");
+    }
+
+    private static bool SupportsGptImage2(SonnetGroup group)
+    {
+        if (ContainsAny(group.DefaultMappedModel, "gpt-image-2"))
+        {
+            return true;
+        }
+
+        if (ModelListContains(group.ModelsListConfig, "gpt-image-2"))
+        {
+            return true;
+        }
+
+        if (ModelListIsUnrestricted(group.ModelsListConfig))
+        {
+            return true;
+        }
+
+        return JsonArrayContains(group.SupportedModelScopes, "gpt_image") ||
+            JsonArrayContains(group.SupportedModelScopes, "openai_image") ||
+            JsonArrayContains(group.SupportedModelScopes, "image_generation");
     }
 
     private static bool IsOpenAiGroup(SonnetGroup? group)
@@ -711,6 +760,85 @@ public sealed class SonnetAccountClient
     private static bool ContainsAny(string value, params string[] tokens)
     {
         return tokens.Any(token => value.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool JsonArrayContains(JsonElement element, string expected)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var item in element.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String &&
+                string.Equals(item.GetString(), expected, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ModelListContains(JsonElement config, string expected)
+    {
+        if (TryGetModelsArray(config, out var models))
+        {
+            foreach (var model in models.EnumerateArray())
+            {
+                if (model.ValueKind == JsonValueKind.String &&
+                    IsGptImage2Model(model.GetString()))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ModelListIsUnrestricted(JsonElement config)
+    {
+        if (config.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        if (config.ValueKind == JsonValueKind.Object)
+        {
+            if (config.TryGetProperty("enabled", out var enabled) &&
+                enabled.ValueKind is JsonValueKind.False)
+            {
+                return true;
+            }
+
+            return !TryGetModelsArray(config, out var models) ||
+                models.ValueKind != JsonValueKind.Array ||
+                !models.EnumerateArray().Any();
+        }
+
+        return false;
+    }
+
+    private static bool TryGetModelsArray(JsonElement config, out JsonElement models)
+    {
+        if (config.ValueKind == JsonValueKind.Object &&
+            config.TryGetProperty("models", out models) &&
+            models.ValueKind == JsonValueKind.Array)
+        {
+            return true;
+        }
+
+        models = default;
+        return false;
+    }
+
+    private static bool IsGptImage2Model(string? model)
+    {
+        return !string.IsNullOrWhiteSpace(model) &&
+            (model.Equals("gpt-image-2", StringComparison.OrdinalIgnoreCase) ||
+            model.StartsWith("gpt-image-2-", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ResolvePaymentType(SonnetCheckoutInfo checkout, string? requested)

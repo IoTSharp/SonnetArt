@@ -351,7 +351,7 @@ window.sonnetArt = {
   clearLaunchCredentials: function () {
     const url = new URL(window.location.href);
     let changed = false;
-    for (const key of ['token', 'user_id']) {
+    for (const key of ['token', 'access_token', 'auth_token', 'jwt', 'bearer_token', 'refresh_token', 'expires_in', 'user_id']) {
       if (url.searchParams.has(key)) {
         url.searchParams.delete(key);
         changed = true;

@@ -183,6 +183,8 @@ public partial class Home
     private bool _systemPrefersDark;
     private SiteBranding _branding = SiteBranding.Default;
     private EmbeddedLaunchContext _launchContext = new();
+    private bool _launchCredentialsConsumed;
+    private bool _launchCredentialsCleared;
     private bool _serverOnline;
     private bool _serverStatusChecked;
     private DateTimeOffset? _serverStatusCheckedAt;
@@ -425,8 +427,8 @@ public partial class Home
 
     protected override async Task OnInitializedAsync()
     {
-        _snapshot = await Storage.LoadAsync();
         _launchContext = EmbeddedLaunchContextParser.Parse(Navigation);
+        _snapshot = await Storage.LoadAsync();
         ApplyLaunchContext(_launchContext);
         _branding = await SiteConfig.LoadBrandingAsync();
         await LoadPromptLibraryPage(new PromptLibraryQuery(
@@ -450,7 +452,6 @@ public partial class Home
                 _systemPrefersDark = await JsRuntime.InvokeAsync<bool>("sonnetArt.prefersDarkTheme");
                 _selfReference = DotNetObjectReference.Create(this);
                 _systemThemeWatchId = await JsRuntime.InvokeAsync<string>("sonnetArt.watchSystemTheme", _selfReference);
-                await JsRuntime.InvokeVoidAsync("sonnetArt.clearLaunchCredentials");
             }
             catch (JSException)
             {
@@ -459,6 +460,7 @@ public partial class Home
 
         await SyncDocumentThemeAsync();
         await SyncSiteBrandingAsync();
+        await ClearLaunchCredentialsIfReadyAsync();
 
         if (firstRender)
         {
@@ -495,11 +497,9 @@ public partial class Home
 
     private void ApplyLaunchContext(EmbeddedLaunchContext context)
     {
-        if (!string.IsNullOrWhiteSpace(context.AccessToken))
+        if (context.HasCredentials)
         {
-            Settings.SonnetAccessToken = context.AccessToken.Trim();
-            Settings.SonnetRefreshToken = string.Empty;
-            Settings.SonnetTokenExpiresAt = null;
+            ApplyLaunchCredentials(context);
         }
 
         if (context.UserId is > 0)
@@ -534,6 +534,16 @@ public partial class Home
         }
     }
 
+    private void ApplyLaunchCredentials(EmbeddedLaunchContext context)
+    {
+        Settings.SonnetAccessToken = context.AccessToken!.Trim();
+        Settings.SonnetRefreshToken = context.RefreshToken?.Trim() ?? string.Empty;
+        Settings.SonnetTokenExpiresAt = context.ExpiresIn is > 0
+            ? DateTimeOffset.Now.AddSeconds(context.ExpiresIn.Value)
+            : null;
+        _launchCredentialsConsumed = true;
+    }
+
     private static PromptLibraryLanguage ResolvePromptLibraryLanguage(string? language)
     {
         return language?.StartsWith("en", StringComparison.OrdinalIgnoreCase) == true
@@ -553,6 +563,23 @@ public partial class Home
                     description = SiteDescription,
                     iconUrl = SiteIconUrl,
                 });
+        }
+        catch (JSException)
+        {
+        }
+    }
+
+    private async Task ClearLaunchCredentialsIfReadyAsync()
+    {
+        if (_launchCredentialsCleared || !_launchCredentialsConsumed || !AccountReady)
+        {
+            return;
+        }
+
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("sonnetArt.clearLaunchCredentials");
+            _launchCredentialsCleared = true;
         }
         catch (JSException)
         {
@@ -2853,6 +2880,10 @@ public partial class Home
             {
                 await SaveAsync();
             }
+            if (_launchContext.IsEmbedded)
+            {
+                SetSonnetMessage("嵌入页面没有收到 sub2api 登录令牌，请确认从已登录的 sub2api 自定义菜单打开。", isError: true);
+            }
             return;
         }
 
@@ -2863,7 +2894,7 @@ public partial class Home
         {
             await CompleteAccountSetupAsync();
             await SaveAsync();
-            SetSonnetMessage("账户已恢复。");
+            SetSonnetMessage(_launchCredentialsConsumed ? "已通过 sub2api 自动登录。" : "账户已恢复。");
         }
         catch (Exception ex)
         {
