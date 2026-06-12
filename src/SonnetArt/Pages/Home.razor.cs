@@ -130,6 +130,10 @@ public partial class Home
     private bool _promptLibraryLoading;
     private long _promptLibraryRequestId;
     private string? _promptLibraryNotice;
+    private PromptLibrarySelection? _activePromptTemplateSelection;
+    private PromptTemplate? _activePromptTemplate;
+    private Dictionary<string, string> _promptTemplateValues = new(StringComparer.OrdinalIgnoreCase);
+    private bool _promptTemplateGenerateAfterApply;
     private int _count = 1;
     private bool _galleryOpen;
     private string _gallerySearch = string.Empty;
@@ -347,6 +351,15 @@ public partial class Home
     private string ImagePreviewStageClass => _previewEditing ? "image-preview-stage is-editing" : "image-preview-stage";
     private string ImagePreviewEditButtonClass => _previewEditing ? "active" : string.Empty;
     private bool PreviewEditSubmitDisabled => _loading || _previewImage is null || string.IsNullOrWhiteSpace(_previewEditPrompt);
+    private bool PromptTemplateSubmitDisabled => _activePromptTemplate is null ||
+        _activePromptTemplate.Slots.Any(slot =>
+            slot.Required &&
+            (!_promptTemplateValues.TryGetValue(slot.Name, out var value) ||
+                string.IsNullOrWhiteSpace(value)));
+    private string PromptTemplateTitle => _activePromptTemplateSelection?.Item.GetTitle(_activePromptTemplateSelection.Language) ?? "提示词参数";
+    private string PromptTemplatePreview => _activePromptTemplate is null
+        ? string.Empty
+        : _activePromptTemplate.Compile(_promptTemplateValues);
     private IReadOnlyList<GeneratedImage> LatestImages =>
         ActiveSession.Messages.LastOrDefault(message => message.Images.Count > 0)?.Images ?? [];
 
@@ -979,6 +992,11 @@ public partial class Home
     {
         var text = (request.Text ?? string.Empty).Trim();
         if (_loading || (text.Length == 0 && !HasImageInputs()))
+        {
+            return;
+        }
+
+        if (TryOpenPromptTemplate(text, generateAfterApply: true))
         {
             return;
         }
@@ -1976,7 +1994,76 @@ public partial class Home
 
     private Task UsePrompt(PromptLibrarySelection selection)
     {
+        if (TryOpenPromptTemplate(selection.Prompt, selection))
+        {
+            return Task.CompletedTask;
+        }
+
         return UsePrompt(selection.Prompt);
+    }
+
+    private bool TryOpenPromptTemplate(
+        string prompt,
+        PromptLibrarySelection? selection = null,
+        bool generateAfterApply = false)
+    {
+        var template = PromptTemplateParser.Parse(prompt);
+        if (!template.HasSlots)
+        {
+            return false;
+        }
+
+        _activePromptTemplateSelection = selection;
+        _activePromptTemplate = template;
+        _promptTemplateGenerateAfterApply = generateAfterApply;
+        _promptTemplateValues = template.Slots.ToDictionary(
+            slot => slot.Name,
+            slot => slot.DefaultValue,
+            StringComparer.OrdinalIgnoreCase);
+        _promptLibraryNotice = $"请填写 {template.Slots.Count} 个参数";
+        return true;
+    }
+
+    private Task UpdatePromptTemplateValue(PromptTemplateSlot slot, ChangeEventArgs args)
+    {
+        _promptTemplateValues[slot.Name] = args.Value?.ToString() ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private Task TogglePromptTemplateBoolean(PromptTemplateSlot slot, ChangeEventArgs args)
+    {
+        _promptTemplateValues[slot.Name] = args.Value is bool value && value ? "true" : "false";
+        return Task.CompletedTask;
+    }
+
+    private async Task ApplyPromptTemplate()
+    {
+        if (_activePromptTemplate is null)
+        {
+            return;
+        }
+
+        var prompt = _activePromptTemplate.Compile(_promptTemplateValues);
+        var shouldGenerate = _promptTemplateGenerateAfterApply;
+        ClosePromptTemplateDialog();
+        if (shouldGenerate)
+        {
+            _senderText = prompt;
+            await HandleUserTextAsync(prompt);
+        }
+        else
+        {
+            await UsePrompt(prompt);
+            _promptLibraryNotice = "模板已编译到输入框";
+        }
+    }
+
+    private void ClosePromptTemplateDialog()
+    {
+        _activePromptTemplateSelection = null;
+        _activePromptTemplate = null;
+        _promptTemplateValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _promptTemplateGenerateAfterApply = false;
     }
 
     private async Task LoadPromptLibraryPage(PromptLibraryQuery query)

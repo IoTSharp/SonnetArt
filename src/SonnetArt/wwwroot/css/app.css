@@ -2420,6 +2420,142 @@ html[data-sonnetart-theme="dark"] .workspace-item.active,
     backdrop-filter: blur(10px);
 }
 
+.prompt-template-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1220;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: var(--studio-modal-overlay);
+    backdrop-filter: blur(10px);
+}
+
+.prompt-template-dialog {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 16px;
+    width: min(920px, 100%);
+    max-height: min(820px, calc(100vh - 36px));
+    padding: 18px;
+    border: 1px solid var(--studio-line);
+    border-radius: 8px;
+    background:
+        linear-gradient(180deg, var(--studio-panel-translucent), var(--studio-panel)),
+        var(--studio-spectrum-soft);
+    box-shadow: var(--studio-shadow);
+    overflow: hidden;
+    backdrop-filter: blur(18px);
+}
+
+.prompt-template-dialog header,
+.prompt-template-dialog footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.prompt-template-dialog h2 {
+    margin: 2px 0 0;
+    color: var(--studio-ink);
+    font-size: 20px;
+    line-height: 1.2;
+}
+
+.prompt-template-dialog header button {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    border-radius: 6px;
+    color: var(--studio-ink);
+    background: var(--studio-soft);
+}
+
+.prompt-template-dialog footer {
+    justify-content: flex-end;
+}
+
+.prompt-template-body {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.9fr) minmax(340px, 1.1fr);
+    gap: 14px;
+    min-height: 0;
+}
+
+.prompt-template-fields {
+    display: grid;
+    align-content: start;
+    gap: 10px;
+    min-height: 0;
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.prompt-template-field {
+    display: grid;
+    gap: 6px;
+    padding: 10px;
+    border: 1px solid var(--studio-line);
+    border-radius: 8px;
+    background: var(--studio-panel-translucent);
+}
+
+.prompt-template-field > span {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--studio-ink);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.prompt-template-field em {
+    color: var(--studio-muted);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 800;
+}
+
+.prompt-template-check {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--studio-accent);
+}
+
+.prompt-template-textarea {
+    min-height: 112px;
+}
+
+.prompt-template-preview {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    padding: 12px;
+    border: 1px solid var(--studio-line);
+    border-radius: 8px;
+    background: var(--studio-soft-strong);
+}
+
+.prompt-template-preview pre {
+    min-height: 0;
+    margin: 10px 0 0;
+    overflow: auto;
+    padding: 12px;
+    border-radius: 8px;
+    color: var(--studio-code-text);
+    background: var(--studio-code-bg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
+    font-size: 12px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .workspace-create-dialog {
     display: grid;
     gap: 14px;
@@ -5276,8 +5412,23 @@ code {
     .auth-dialog,
     .auth-proxy-dialog,
     .payment-dialog,
+    .prompt-template-dialog,
     .image-preview-dialog {
         max-height: calc(100vh - 24px);
+    }
+
+    .prompt-template-dialog {
+        width: 100%;
+        padding: 14px;
+    }
+
+    .prompt-template-body {
+        grid-template-columns: 1fr;
+        overflow: auto;
+    }
+
+    .prompt-template-preview {
+        min-height: 320px;
     }
 
     .image-preview-dialog {

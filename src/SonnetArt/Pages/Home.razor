@@ -601,6 +601,95 @@
                            OnCreate="@CreateWorkspace"
                            OnCancel="@CloseWorkspaceCreate" />
 
+    @if (_activePromptTemplate is not null)
+    {
+        <div class="prompt-template-backdrop" @onclick="ClosePromptTemplateDialog">
+            <section class="prompt-template-dialog" role="dialog" aria-modal="true" aria-labelledby="prompt-template-title" @onclick:stopPropagation>
+                <header>
+                    <div>
+                        <span class="workspace-eyebrow">模板参数</span>
+                        <h2 id="prompt-template-title">@PromptTemplateTitle</h2>
+                    </div>
+                    <button type="button" title="关闭" @onclick="ClosePromptTemplateDialog">
+                        <Icon Type="close" Theme="IconThemeType.Outline" />
+                    </button>
+                </header>
+
+                <div class="prompt-template-body">
+                    <div class="prompt-template-fields">
+                        @foreach (var slot in _activePromptTemplate.Slots)
+                        {
+                            var value = _promptTemplateValues.TryGetValue(slot.Name, out var current) ? current : slot.DefaultValue;
+                            <label class="prompt-template-field">
+                                <span>
+                                    @slot.Label
+                                    @if (slot.Required)
+                                    {
+                                        <em>必填</em>
+                                    }
+                                </span>
+
+                                @if (slot.Options.Count > 0)
+                                {
+                                    <select class="studio-select" value="@value" @onchange="args => UpdatePromptTemplateValue(slot, args)">
+                                        @foreach (var option in slot.Options)
+                                        {
+                                            <option value="@option">@option</option>
+                                        }
+                                    </select>
+                                }
+                                else if (slot.IsBoolean)
+                                {
+                                    <input class="prompt-template-check"
+                                           type="checkbox"
+                                           checked="@string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)"
+                                           @onchange="args => TogglePromptTemplateBoolean(slot, args)" />
+                                }
+                                else if (slot.IsNumber)
+                                {
+                                    <input class="studio-input"
+                                           type="number"
+                                           value="@value"
+                                           @oninput="args => UpdatePromptTemplateValue(slot, args)" />
+                                }
+                                else if (slot.IsLongText)
+                                {
+                                    <textarea class="studio-textarea prompt-template-textarea"
+                                              value="@value"
+                                              @oninput="args => UpdatePromptTemplateValue(slot, args)"></textarea>
+                                }
+                                else
+                                {
+                                    <input class="studio-input"
+                                           value="@value"
+                                           @oninput="args => UpdatePromptTemplateValue(slot, args)" />
+                                }
+                            </label>
+                        }
+                    </div>
+
+                    <aside class="prompt-template-preview">
+                        <div class="settings-section-title">
+                            <strong>编译预览</strong>
+                            <span>@_activePromptTemplate.Slots.Count 个参数</span>
+                        </div>
+                        <pre>@PromptTemplatePreview</pre>
+                    </aside>
+                </div>
+
+                <footer>
+                    <button type="button" class="studio-button studio-button-ghost" @onclick="ClosePromptTemplateDialog">
+                        <span>取消</span>
+                    </button>
+                    <button type="button" class="studio-button studio-button-primary" disabled="@PromptTemplateSubmitDisabled" @onclick="ApplyPromptTemplate">
+                        <Icon Type="select" Theme="IconThemeType.Outline" />
+                        <span>使用模板</span>
+                    </button>
+                </footer>
+            </section>
+        </div>
+    }
+
     @if (_settingsOpen)
     {
         <div class="settings-backdrop" @onclick="CloseSettings">
