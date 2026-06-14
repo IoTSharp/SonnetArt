@@ -2,6 +2,8 @@ using System.Net;
 using System.IO.Compression;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.FileProviders;
+using SonnetHost.PromptLibrary;
 using SonnetHost.Proxy;
 
 var builder = WebApplication.CreateSlimBuilder(args);
@@ -30,6 +32,13 @@ builder.Services.Configure<GzipCompressionProviderOptions>(options =>
 builder.Services.AddHttpClient(SonnetProxyEndpoints.HttpClientName, client =>
 {
     client.Timeout = TimeSpan.FromMinutes(10);
+    client.DefaultRequestVersion = HttpVersion.Version11;
+    client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+})
+.ConfigurePrimaryHttpMessageHandler(CreateProxyHandler);
+builder.Services.AddHttpClient("prompt-library-images", client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(2);
     client.DefaultRequestVersion = HttpVersion.Version11;
     client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
 })
@@ -65,10 +74,12 @@ app.Use(async (context, next) =>
 
 app.UseSonnetArtSecurityHeaders();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapPromptLibraryEndpoints();
 app.MapSonnetProxyEndpoints();
 app.UseResponseCompression();
 app.UseSonnetArtFrameworkAliases();
 app.UseBlazorFrameworkFiles();
+app.UseSonnetArtClientStaticFiles();
 app.UseSonnetArtStaticFiles();
 app.MapFallbackToFile("index.html");
 
@@ -136,6 +147,35 @@ internal static class SonnetArtStaticFileApplicationBuilderExtensions
         });
     }
 
+    public static IApplicationBuilder UseSonnetArtClientStaticFiles(this IApplicationBuilder app)
+    {
+        var clientWebRoot = ResolveClientWebRoot(app.ApplicationServices);
+        if (!Directory.Exists(clientWebRoot))
+        {
+            return app;
+        }
+
+        var contentTypeProvider = new FileExtensionContentTypeProvider();
+        contentTypeProvider.Mappings[".dat"] = "application/octet-stream";
+        contentTypeProvider.Mappings[".dll"] = "application/octet-stream";
+        contentTypeProvider.Mappings[".wasm"] = "application/wasm";
+        contentTypeProvider.Mappings[".webcil"] = "application/octet-stream";
+
+        return app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new PhysicalFileProvider(clientWebRoot),
+            ContentTypeProvider = contentTypeProvider,
+            OnPrepareResponse = context =>
+            {
+                var path = context.Context.Request.Path;
+                if (IsNoCacheAsset(path))
+                {
+                    DisableResponseCache(context.Context.Response);
+                }
+            },
+        });
+    }
+
     public static IApplicationBuilder UseSonnetArtFrameworkAliases(this IApplicationBuilder app)
     {
         return app.Use(async (context, next) =>
@@ -171,16 +211,7 @@ internal static class SonnetArtStaticFileApplicationBuilderExtensions
             return false;
         }
 
-        var environment = services.GetRequiredService<IWebHostEnvironment>();
-        var clientFrameworkDirectory = Path.GetFullPath(Path.Combine(
-            environment.ContentRootPath,
-            "..",
-            "SonnetArt",
-            "bin",
-            environment.EnvironmentName.Equals("Development", StringComparison.OrdinalIgnoreCase) ? "Debug" : "Release",
-            "net10.0",
-            "wwwroot",
-            "_framework"));
+        var clientFrameworkDirectory = Path.Combine(ResolveClientWebRoot(services), "_framework");
         if (!Directory.Exists(clientFrameworkDirectory))
         {
             return false;
@@ -190,6 +221,19 @@ internal static class SonnetArtStaticFileApplicationBuilderExtensions
             .Order(StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault() ?? string.Empty;
         return physicalFile.Length > 0;
+    }
+
+    private static string ResolveClientWebRoot(IServiceProvider services)
+    {
+        var environment = services.GetRequiredService<IWebHostEnvironment>();
+        return Path.GetFullPath(Path.Combine(
+            environment.ContentRootPath,
+            "..",
+            "SonnetArt",
+            "bin",
+            environment.EnvironmentName.Equals("Development", StringComparison.OrdinalIgnoreCase) ? "Debug" : "Release",
+            "net10.0",
+            "wwwroot"));
     }
 
     private static bool IsNoCacheAsset(PathString path)

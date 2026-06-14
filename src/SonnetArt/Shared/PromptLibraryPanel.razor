@@ -90,7 +90,18 @@
                         var category = item.GetCategory(_language);
                         var description = item.GetDescription(_language);
                         var prompt = item.GetPrompt(_language);
+                        var previewImage = item.PreviewImages.FirstOrDefault();
                         <article class="prompt-card">
+                            @if (!string.IsNullOrWhiteSpace(previewImage))
+                            {
+                                <figure class="prompt-card-preview">
+                                    <img src="@previewImage" alt="@title" loading="lazy" />
+                                    @if (item.PreviewImages.Count > 1)
+                                    {
+                                        <figcaption>@item.PreviewImages.Count 张示例图</figcaption>
+                                    }
+                                </figure>
+                            }
                             <header>
                                 <div>
                                     <strong title="@title">@title</strong>
@@ -115,6 +126,10 @@
                                 @if (item.NeedsReferenceImages)
                                 {
                                     <span>需参考图</span>
+                                }
+                                @if (item.PreviewImages.Count > 0)
+                                {
+                                    <span>@item.PreviewImages.Count 张图</span>
                                 }
                             </div>
                             <details>

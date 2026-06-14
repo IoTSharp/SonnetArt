@@ -139,8 +139,16 @@ public partial class Home
     private bool _promptLibraryLoading;
     private long _promptLibraryRequestId;
     private string? _promptLibraryNotice;
+    private PromptLibraryQuery _promptLibraryQuery = new(
+        1,
+        PromptLibraryPageSize,
+        PromptLibraryLanguage.Chinese,
+        null,
+        null,
+        null);
     private PromptLibrarySelection? _activePromptTemplateSelection;
     private PromptTemplate? _activePromptTemplate;
+    private PromptLibrarySelection? _pendingPromptLibrarySelection;
     private Dictionary<string, string> _promptTemplateValues = new(StringComparer.OrdinalIgnoreCase);
     private bool _promptTemplateGenerateAfterApply;
     private int _count = 1;
@@ -1043,6 +1051,7 @@ public partial class Home
             {
                 AttachGeneratedImagesToCommerceNode(durableImages);
             }
+            await CachePromptLibraryPreviewImagesAsync(prompt, durableImages);
             completed = true;
         }
         catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
@@ -2368,10 +2377,11 @@ public partial class Home
             trimmed.StartsWith($"{StudioWorkspace.DefaultName(StudioWorkspace.CommerceProductImageType)} ", StringComparison.Ordinal);
     }
 
-    private async Task UsePrompt(string prompt)
+    private async Task UsePrompt(string prompt, PromptLibrarySelection? selection = null)
     {
         ActiveSession.Prompt = prompt;
         _senderText = prompt;
+        _pendingPromptLibrarySelection = selection;
         _promptLibraryNotice = "已填入输入框";
         TouchActiveSession(prompt);
         await SaveAsync();
@@ -2384,7 +2394,7 @@ public partial class Home
             return Task.CompletedTask;
         }
 
-        return UsePrompt(selection.Prompt);
+        return UsePrompt(selection.Prompt, selection);
     }
 
     private bool TryOpenPromptTemplate(
@@ -2430,6 +2440,7 @@ public partial class Home
 
         var prompt = _activePromptTemplate.Compile(_promptTemplateValues);
         var shouldGenerate = _promptTemplateGenerateAfterApply;
+        var selection = _activePromptTemplateSelection;
         ClosePromptTemplateDialog();
         if (shouldGenerate)
         {
@@ -2438,7 +2449,7 @@ public partial class Home
         }
         else
         {
-            await UsePrompt(prompt);
+            await UsePrompt(prompt, selection);
             _promptLibraryNotice = "模板已编译到输入框";
         }
     }
@@ -2453,11 +2464,12 @@ public partial class Home
 
     private async Task LoadPromptLibraryPage(PromptLibraryQuery query)
     {
+        _promptLibraryQuery = query;
         var requestId = Interlocked.Increment(ref _promptLibraryRequestId);
         _promptLibraryLoading = true;
         try
         {
-            var page = await PromptLibrary.LoadPageAsync(query);
+            var page = await PromptLibrary.LoadPageAsync(query, BuildPromptLibraryPreviewMap());
             if (requestId == _promptLibraryRequestId)
             {
                 _promptLibraryPage = page;
@@ -2479,6 +2491,70 @@ public partial class Home
                 _promptLibraryLoading = false;
             }
         }
+    }
+
+    private IReadOnlyDictionary<string, List<string>> BuildPromptLibraryPreviewMap()
+    {
+        return _snapshot.PromptLibraryPreviewCache
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.PromptId) && entry.Images.Count > 0)
+            .ToDictionary(
+                entry => entry.PromptId,
+                entry => entry.Images.ToList(),
+                StringComparer.Ordinal);
+    }
+
+    private async Task CachePromptLibraryPreviewImagesAsync(
+        string generatedPrompt,
+        IReadOnlyList<GeneratedImage> images)
+    {
+        if (_pendingPromptLibrarySelection is null || images.Count == 0)
+        {
+            return;
+        }
+
+        var selectedPrompt = _pendingPromptLibrarySelection.Prompt.Trim();
+        if (!string.Equals(selectedPrompt, generatedPrompt.Trim(), StringComparison.Ordinal))
+        {
+            _pendingPromptLibrarySelection = null;
+            return;
+        }
+
+        var promptId = _pendingPromptLibrarySelection.Item.Id;
+        var urls = images
+            .Select(image => image.Url)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.Ordinal)
+            .Take(4)
+            .ToArray();
+        if (urls.Length == 0)
+        {
+            return;
+        }
+
+        var entry = _snapshot.PromptLibraryPreviewCache
+            .FirstOrDefault(item => string.Equals(item.PromptId, promptId, StringComparison.Ordinal));
+        if (entry is null)
+        {
+            entry = new PromptLibraryPreviewCacheEntry
+            {
+                PromptId = promptId,
+                Prompt = selectedPrompt,
+            };
+            _snapshot.PromptLibraryPreviewCache.Add(entry);
+        }
+
+        entry.Prompt = selectedPrompt;
+        entry.Images = urls
+            .Concat(entry.Images)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.Ordinal)
+            .Take(4)
+            .ToList();
+        entry.UpdatedAt = DateTimeOffset.Now;
+
+        _pendingPromptLibrarySelection = null;
+        await LoadPromptLibraryPage(_promptLibraryQuery);
+        _promptLibraryNotice = "已缓存为词库预览";
     }
 
     private async Task CopyPrompt(PromptLibrarySelection selection)

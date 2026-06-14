@@ -20,6 +20,8 @@ public sealed class PromptLibraryItem
     public bool NeedsReferenceImages { get; set; }
     public string Language { get; set; } = string.Empty;
     public IReadOnlyList<string> Tags { get; set; } = [];
+    public List<string> PreviewImages { get; set; } = [];
+    public List<string> UserPreviewImages { get; set; } = [];
 
     public string GetTitle(PromptLibraryLanguage language) =>
         Select(language, TitleZh, TitleEn);
@@ -68,6 +70,14 @@ public enum PromptLibraryLanguage
 
 public sealed record PromptLibrarySelection(PromptLibraryItem Item, PromptLibraryLanguage Language, string Prompt);
 
+public sealed class PromptLibraryPreviewCacheEntry
+{
+    public string PromptId { get; set; } = string.Empty;
+    public string Prompt { get; set; } = string.Empty;
+    public List<string> Images { get; set; } = [];
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
+}
+
 public sealed class PromptLibraryPage
 {
     public List<PromptLibraryItem> Items { get; set; } = [];
@@ -78,6 +88,7 @@ public sealed class PromptLibraryPage
     public List<string> Sources { get; set; } = [];
     public List<string> CategoriesZh { get; set; } = [];
     public List<string> CategoriesEn { get; set; } = [];
+    public Dictionary<string, List<string>> UserPreviewImages { get; set; } = new(StringComparer.Ordinal);
 
     public static PromptLibraryPage Empty(int pageSize = 20) => new()
     {

@@ -844,6 +844,7 @@ public sealed class StudioSnapshot
 
     public List<StudioWorkspace> Workspaces { get; set; } = [];
     public string? ActiveWorkspaceId { get; set; }
+    public List<PromptLibraryPreviewCacheEntry> PromptLibraryPreviewCache { get; set; } = [];
 
     [JsonPropertyName("sessions")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -867,6 +868,12 @@ public sealed class StudioSnapshot
         Settings.Normalize();
         Sessions ??= [];
         Workspaces ??= [];
+        PromptLibraryPreviewCache = PromptLibraryPreviewCache?
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.PromptId) && entry.Images is { Count: > 0 })
+            .Select(NormalizePromptLibraryPreviewCacheEntry)
+            .OrderByDescending(entry => entry.UpdatedAt)
+            .Take(160)
+            .ToList() ?? [];
 
         if (Workspaces.Count == 0)
         {
@@ -890,6 +897,24 @@ public sealed class StudioSnapshot
         }
 
         SyncLegacyFieldsFromWorkspaces();
+    }
+
+    private static PromptLibraryPreviewCacheEntry NormalizePromptLibraryPreviewCacheEntry(PromptLibraryPreviewCacheEntry entry)
+    {
+        entry.PromptId = entry.PromptId.Trim();
+        entry.Prompt = entry.Prompt?.Trim() ?? string.Empty;
+        entry.Images = entry.Images?
+            .Where(image => !string.IsNullOrWhiteSpace(image))
+            .Select(image => image.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .Take(4)
+            .ToList() ?? [];
+        if (entry.UpdatedAt == default)
+        {
+            entry.UpdatedAt = DateTimeOffset.Now;
+        }
+
+        return entry;
     }
 
     public StudioWorkspace GetActiveWorkspace()

@@ -1,3 +1,6 @@
 [submodule "external/AntDesignXBlazor"]
 	path = external/AntDesignXBlazor
 	url = https://github.com/IoTSharp/AntDesignXBlazor.git
+[submodule "external/IoTSharp.Data.JsonDB"]
+	path = external/IoTSharp.Data.JsonDB
+	url = https://github.com/IoTSharp/Data.JsonDB.git
