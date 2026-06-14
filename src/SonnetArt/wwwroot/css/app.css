@@ -1483,6 +1483,29 @@ html[data-sonnetart-theme="dark"] .workspace-item.active,
     font-size: 13px;
 }
 
+.copy-model-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    min-height: 26px;
+    margin-top: 8px;
+    padding: 3px 8px;
+    border: 1px solid var(--studio-line-strong);
+    border-radius: 8px;
+    color: var(--studio-accent-ink);
+    background: var(--studio-control);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.copy-model-status span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .workspace-canvas {
     position: relative;
     display: block;

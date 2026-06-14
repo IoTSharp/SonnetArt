@@ -5,12 +5,23 @@
             <header>
                 <div>
                     <span class="workspace-eyebrow">工作空间</span>
-                    <h2 id="workspace-create-title">新建作图工作空间</h2>
+                    <h2 id="workspace-create-title">新建工作空间</h2>
                 </div>
                 <button type="button" title="关闭" @onclick="Cancel">
                     <Icon Type="close" Theme="IconThemeType.Outline" />
                 </button>
             </header>
+
+            <div class="workspace-type-segment" role="tablist" aria-label="工作空间类型">
+                <button type="button" class='@TypeClass("copy")' @onclick='() => SetType("copy")'>
+                    <Icon Type="file-text" Theme="IconThemeType.Outline" />
+                    <span>文案空间</span>
+                </button>
+                <button type="button" class='@TypeClass("graphic")' @onclick='() => SetType("graphic")'>
+                    <Icon Type="picture" Theme="IconThemeType.Outline" />
+                    <span>作图空间</span>
+                </button>
+            </div>
 
             <div class="studio-field">
                 <label class="studio-label">名称</label>
@@ -33,9 +44,21 @@
 @code {
     [Parameter] public bool Open { get; set; }
     [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Type { get; set; } = "copy";
     [Parameter] public EventCallback<string> NameChanged { get; set; }
+    [Parameter] public EventCallback<string> TypeChanged { get; set; }
     [Parameter] public EventCallback OnCreate { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string TypeClass(string type)
+    {
+        return string.Equals(Type, type, StringComparison.OrdinalIgnoreCase) ? "active" : string.Empty;
+    }
+
+    private Task SetType(string type)
+    {
+        return TypeChanged.InvokeAsync(type);
+    }
 
     private Task UpdateName(ChangeEventArgs args)
     {

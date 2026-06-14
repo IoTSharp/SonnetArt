@@ -7,6 +7,16 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 
+	@html path / /index.html
+	header @html {
+		Cache-Control "no-cache, no-store, must-revalidate"
+		Pragma "no-cache"
+		Expires "0"
+	}
+
+	@boot path /_framework/blazor.boot.json /_framework/blazor.boot*.json /service-worker-assets.js
+	header @boot Cache-Control "no-cache, no-store, must-revalidate"
+
 	handle_path /api/sonnet/* {
 		rewrite * /api/v1{path}
 		reverse_proxy {$SONNET_ART_ACCOUNT_UPSTREAM_URL} {

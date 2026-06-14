@@ -10,6 +10,7 @@ namespace SonnetArt.Services;
 
 public sealed class SonnetAccountClient
 {
+    private const string DefaultGatewayBaseUrl = "https://sonnet.vip/";
     private const string LocalProxyRoot = "/api/sonnet/";
     private const string LocalProxyHeader = "X-SonnetArt-Proxy";
     private const string SonnetArtKeyName = "SonnetArt Image";
@@ -465,7 +466,14 @@ public sealed class SonnetAccountClient
         }
         catch (SonnetProxyUnavailableException)
         {
-            throw new HttpRequestException("账户代理不可用，请检查 SonnetArt 服务配置。");
+            return await SendOnceAsync<T>(
+                settings,
+                method,
+                path,
+                body,
+                accessToken,
+                useLocalProxy: false,
+                cancellationToken);
         }
     }
 
@@ -480,7 +488,7 @@ public sealed class SonnetAccountClient
     {
         using var request = new HttpRequestMessage(
             method,
-            BuildLocalProxyEndpoint(path));
+            useLocalProxy ? BuildLocalProxyEndpoint(path) : BuildEndpoint(settings.BaseUrl, path));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.AcceptLanguage.ParseAdd("zh-CN");
 
@@ -870,6 +878,38 @@ public sealed class SonnetAccountClient
     private static Uri BuildLocalProxyEndpoint(string path)
     {
         return new Uri(LocalProxyRoot + path.TrimStart('/'), UriKind.Relative);
+    }
+
+    private static Uri BuildEndpoint(string baseUrl, string path)
+    {
+        var root = ResolveAbsoluteBaseUrl(baseUrl);
+        if (!root.EndsWith("api/v1/", StringComparison.OrdinalIgnoreCase))
+        {
+            root += "api/v1/";
+        }
+
+        return new Uri(new Uri(root, UriKind.Absolute), path.TrimStart('/'));
+    }
+
+    private static string ResolveAbsoluteBaseUrl(string? baseUrl)
+    {
+        var root = string.IsNullOrWhiteSpace(baseUrl) ||
+            string.Equals(baseUrl.Trim(), "/", StringComparison.Ordinal)
+                ? DefaultGatewayBaseUrl
+                : baseUrl.Trim();
+
+        if (!Uri.TryCreate(root, UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("http" or "https"))
+        {
+            root = DefaultGatewayBaseUrl;
+        }
+
+        if (!root.EndsWith('/'))
+        {
+            root += "/";
+        }
+
+        return root;
     }
 
     private static string? EmptyToNull(string? value)

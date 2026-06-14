@@ -155,6 +155,7 @@ public partial class Home
     private bool _exitConfirmOpen;
     private bool _workspaceCreateOpen;
     private string _workspaceCreateName = string.Empty;
+    private string _workspaceCreateType = StudioWorkspace.CopyType;
     private bool _sonnetBusy;
     private bool _sonnetRegisterOpen;
     private string? _error;
@@ -212,17 +213,19 @@ public partial class Home
 
     private StudioSettings Settings => _snapshot.Settings;
 
-    private StudioWorkspace ActiveGraphicWorkspace => _snapshot.GetActiveWorkspace();
+    private StudioWorkspace ActiveWorkspace => _snapshot.GetActiveWorkspace();
 
     private StudioSession ActiveSession =>
-        ActiveGraphicWorkspace.Sessions.FirstOrDefault(session => session.Id == ActiveGraphicWorkspace.ActiveSessionId)
-        ?? ActiveGraphicWorkspace.Sessions.First();
+        ActiveWorkspace.Sessions.FirstOrDefault(session => session.Id == ActiveWorkspace.ActiveSessionId)
+        ?? ActiveWorkspace.Sessions.First();
 
     private bool SonnetLoggedIn => !string.IsNullOrWhiteSpace(Settings.SonnetAccessToken);
+    private bool ChatReady => SonnetLoggedIn &&
+        !string.IsNullOrWhiteSpace(Settings.OpenAiApiKey);
     private bool AccountReady => SonnetLoggedIn &&
         !string.IsNullOrWhiteSpace(Settings.ImageApiKey) &&
         !string.IsNullOrWhiteSpace(Settings.OpenAiApiKey);
-    private bool RequiresAuthOverlay => !AccountReady && !_sonnetBusy;
+    private bool RequiresAuthOverlay => !(IsGraphicWorkspace ? AccountReady : ChatReady) && !_sonnetBusy;
     private string EffectiveTheme => Settings.ThemeMode == "dark" || (Settings.ThemeMode == "system" && _systemPrefersDark)
         ? "dark"
         : "light";
@@ -258,11 +261,32 @@ public partial class Home
     private string SidebarClass => _leftSidebarCollapsed ? "studio-sidebar is-collapsed" : "studio-sidebar";
     private string PromptPanelClass => _rightPromptPanelCollapsed ? "prompt-sidebar is-collapsed" : "prompt-sidebar";
     private string CanvasClass => _loading ? "workspace-canvas is-loading" : "workspace-canvas";
-    private string WorkspaceStatus => _loading
+    private bool IsGraphicWorkspace => ActiveWorkspace.Type == StudioWorkspace.GraphicType;
+    private bool IsCopyWorkspace => ActiveWorkspace.Type == StudioWorkspace.CopyType;
+    private string ActiveWorkspaceLabel => WorkspaceTypeLabel(ActiveWorkspace.Type);
+    private string ClearResultsText => IsGraphicWorkspace ? "清空结果" : "清空会话";
+    private string EmptyTitle => IsGraphicWorkspace ? "准备开始作图" : "准备开始写文案";
+    private string EmptyDescription => IsGraphicWorkspace
+        ? "在底部输入描述，生成结果会永久保存在当前会话。"
+        : "在底部输入需求，文案会永久保存在当前会话。";
+    private string EmptyIcon => IsGraphicWorkspace ? "picture" : "file-text";
+    private string SenderPlaceholder => IsGraphicWorkspace ? "输入作图描述，按 Enter 生成..." : "输入文案需求，按 Enter 发送...";
+    private string SenderAccept => IsGraphicWorkspace ? "image/*" : string.Empty;
+    private int SenderMaxAttachments => IsGraphicWorkspace ? 16 : 0;
+    private string SenderUploadText => IsGraphicWorkspace ? "添加图片" : string.Empty;
+    private string SenderAttachmentsPlaceholder => IsGraphicWorkspace ? "选择、拖入或粘贴图片" : string.Empty;
+    private string WorkspaceStatus => IsCopyWorkspace
+        ? _loading
+            ? "正在生成文案，请保持窗口打开"
+            : ActiveSession.Messages.Count == 0
+                ? "已就绪，可以开始写文案"
+                : $"文案会话 {ActiveSession.Messages.Count} 条消息"
+        : _loading
         ? $"正在生成，请保持窗口打开 · {EstimateDurationLabel(_count, Settings.ResolutionTier, ActiveSession.Mode)}"
         : GalleryImages.Count == 0
             ? "已就绪，可以开始作图"
             : $"作品库 {GalleryImages.Count} 张 · 当前筛选 {FilteredGalleryImages.Count} 张";
+    private string ChatModelDisplay => StudioSettings.NormalizeChatModel(Settings.ChatModel);
     private string AuthButtonText => _sonnetBusy ? "处理中..." : _sonnetRegisterOpen ? "创建并登录" : "登录";
     private string PaymentTitle => PaymentSucceeded
         ? "支付完成"
@@ -286,7 +310,7 @@ public partial class Home
     private bool PaymentSucceeded => IsPaymentSuccess(_latestPaymentStatus?.Status);
     private bool PaymentExpired => RemainingPaymentSeconds <= 0 || IsPaymentExpired(_latestPaymentStatus?.Status);
     private bool HasPendingPaymentOrder => _activePaymentOrder is not null && !PaymentSucceeded && !PaymentExpired;
-    private string ModeLabel => ActiveSession.Mode switch
+    private string ModeLabel => IsCopyWorkspace ? "文案空间" : ActiveSession.Mode switch
     {
         "image" => "图生图",
         "edit" => "图片编辑",
@@ -364,13 +388,15 @@ public partial class Home
         ActiveSession.Messages.LastOrDefault(message => message.Images.Count > 0)?.Images ?? [];
 
     private IReadOnlyList<GalleryImageItem> GalleryImages =>
-        ActiveGraphicWorkspace.Sessions
+        IsGraphicWorkspace
+            ? ActiveWorkspace.Sessions
             .SelectMany(session => session.Messages
                 .SelectMany(message => message.Images
                     .Select((image, index) => new GalleryImageItem(session, message, image, index))))
             .Where(item => !string.IsNullOrWhiteSpace(item.Image.Url))
             .OrderByDescending(item => EffectiveImageCreatedAt(item.Image, item.Message))
-            .ToArray();
+            .ToArray()
+            : [];
 
     private IReadOnlyList<GalleryImageItem> FilteredGalleryImages =>
         GalleryImages.Where(MatchesGalleryFilter).ToArray();
@@ -411,14 +437,14 @@ public partial class Home
             .ToArray();
 
     private IReadOnlyList<XConversationItem> ConversationItems =>
-        ActiveGraphicWorkspace.Sessions
+        ActiveWorkspace.Sessions
             .OrderByDescending(session => session.UpdatedAt)
             .Select(session => new XConversationItem
             {
                 Key = session.Id,
                 Title = session.Title,
-                Description = $"{ModeName(session.Mode)} · {session.UpdatedAt.ToLocalTime():MM-dd HH:mm}",
-                Icon = session.Messages.Count > 0 ? "picture" : "message",
+                Description = $"{SessionModeLabel(session)} · {session.UpdatedAt.ToLocalTime():MM-dd HH:mm}",
+                Icon = ConversationIcon(session),
                 Group = session.UpdatedAt.Date == DateTimeOffset.Now.Date ? "今天" : "更早",
                 Count = session.Messages.Count == 0 ? null : session.Messages.Count,
                 UpdatedAt = session.UpdatedAt,
@@ -427,15 +453,15 @@ public partial class Home
 
     private IReadOnlyList<WorkspaceSidebarItem> WorkspaceItems =>
         _snapshot.Workspaces
-            .OrderBy(workspace => WorkspaceSortOrder("graphic"))
+            .OrderBy(workspace => WorkspaceSortOrder(workspace.Type))
             .ThenByDescending(workspace => workspace.LastOpenedAt)
             .ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase)
             .Select(workspace => new WorkspaceSidebarItem(
                 workspace.Id,
                 workspace.Name,
                 WorkspaceDescription(workspace),
-                WorkspaceIcon("graphic"),
-                "graphic"))
+                WorkspaceIcon(workspace.Type),
+                StudioWorkspace.NormalizeType(workspace.Type)))
             .ToArray();
 
     protected override async Task OnInitializedAsync()
@@ -862,18 +888,33 @@ public partial class Home
     private void SetLeftSidebarCollapsed(bool collapsed) => _leftSidebarCollapsed = collapsed;
     private void ToggleLeftSidebarCollapsed() => _leftSidebarCollapsed = !_leftSidebarCollapsed;
     private void SetRightPromptPanelCollapsed(bool collapsed) => _rightPromptPanelCollapsed = collapsed;
-    private static int WorkspaceSortOrder(string type) => 0;
-    private static string WorkspaceIcon(string type) => "picture";
-    private static string WorkspaceTypeLabel(string type) => "平面设计";
+    private static int WorkspaceSortOrder(string type) =>
+        StudioWorkspace.NormalizeType(type) == StudioWorkspace.CopyType ? 0 : 1;
+
+    private static string WorkspaceIcon(string type) =>
+        StudioWorkspace.NormalizeType(type) == StudioWorkspace.CopyType ? "file-text" : "picture";
+
+    private static string WorkspaceTypeLabel(string type) =>
+        StudioWorkspace.NormalizeType(type) == StudioWorkspace.CopyType ? "文案空间" : "平面设计";
+
     private static string WorkspaceDescription(StudioWorkspace workspace)
     {
-        return $"平面设计 · {workspace.Sessions.Count} 个会话";
+        return $"{WorkspaceTypeLabel(workspace.Type)} · {workspace.Sessions.Count} 个会话";
     }
+
+    private string SessionModeLabel(StudioSession session) =>
+        IsCopyWorkspace ? "文案" : ModeName(session.Mode);
+
+    private string ConversationIcon(StudioSession session) =>
+        IsCopyWorkspace
+            ? "file-text"
+            : session.Messages.Count > 0 ? "picture" : "message";
+
     private static string MessageClass(StudioMessage message) => $"thread-message {message.Role}";
-    private static string MessageRoleLabel(string role) => role switch
+    private string MessageRoleLabel(string role) => role switch
     {
         "user" => "我",
-        "assistant" => "图像结果",
+        "assistant" => IsCopyWorkspace ? "文案结果" : "图像结果",
         PromptConfirmRole => "提示词",
         "system" => "系统",
         _ => "消息",
@@ -886,6 +927,12 @@ public partial class Home
     {
         if (_loading)
         {
+            return;
+        }
+
+        if (!IsGraphicWorkspace)
+        {
+            await SendCopyTextAsync((promptOverride ?? ActiveSession.Prompt).Trim());
             return;
         }
 
@@ -1006,6 +1053,12 @@ public partial class Home
 
     private async Task HandleUserTextAsync(string text)
     {
+        if (IsCopyWorkspace)
+        {
+            await SendCopyTextAsync(text);
+            return;
+        }
+
         if (!AccountReady)
         {
             _error = "请先登录账户。";
@@ -1161,6 +1214,77 @@ public partial class Home
         }
         finally
         {
+            _loadingLabel = "正在请求图像接口";
+            TouchActiveSession();
+            await SaveAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task SendCopyTextAsync(string text)
+    {
+        if (_loading || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        if (!ChatReady)
+        {
+            _error = "请先登录账户。";
+            _settingsOpen = false;
+            SetSonnetMessage("登录后会自动完成文案会话配置。", isError: false);
+            return;
+        }
+
+        _error = null;
+        ClearDownloadNotice();
+        _pendingPrompt = null;
+        RemovePendingPromptMessages();
+        ClearAllReferenceInputs();
+        Settings.ChatModel = StudioSettings.NormalizeChatModel(Settings.ChatModel);
+        _loading = true;
+        _loadingLabel = "正在生成文案";
+        _senderText = string.Empty;
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        ActiveSession.Messages.Add(new StudioMessage
+        {
+            Role = "user",
+            Content = text,
+        });
+        TouchActiveSession(text);
+        StateHasChanged();
+        await SaveAsync();
+
+        try
+        {
+            var reply = await ChatClient.ReplyForCopyAsync(Settings, ActiveSession.Messages.SkipLast(1).ToArray(), text, _cts.Token);
+            ActiveSession.Messages.Add(new StudioMessage
+            {
+                Role = "assistant",
+                Content = string.IsNullOrWhiteSpace(reply) ? "我在。把要写的主题、受众和风格告诉我就可以。" : reply,
+            });
+        }
+        catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
+        {
+            ActiveSession.Messages.Add(new StudioMessage
+            {
+                Role = "system",
+                Content = "本次请求已取消。",
+            });
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            ActiveSession.Messages.Add(new StudioMessage
+            {
+                Role = "system",
+                Content = $"文案生成失败：{ex.Message}",
+            });
+        }
+        finally
+        {
+            _loading = false;
             _loadingLabel = "正在请求图像接口";
             TouchActiveSession();
             await SaveAsync();
@@ -1601,6 +1725,12 @@ public partial class Home
 
     private ValueTask<bool> BeforeSenderUpload(IBrowserFile file)
     {
+        if (!IsGraphicWorkspace)
+        {
+            _error = "文案空间不支持图片附件。";
+            return ValueTask.FromResult(false);
+        }
+
         var accepted = IsBrowserImageFile(file);
         if (!accepted)
         {
@@ -1612,6 +1742,11 @@ public partial class Home
 
     private async Task AddSenderFiles(IReadOnlyList<IBrowserFile> files)
     {
+        if (!IsGraphicWorkspace)
+        {
+            return;
+        }
+
         const long maxFileSize = 12 * 1024 * 1024;
         _error = null;
 
@@ -1824,10 +1959,10 @@ public partial class Home
 
     private async Task NewSession()
     {
-        var workspace = ActiveGraphicWorkspace;
+        var workspace = ActiveWorkspace;
         var session = new StudioSession
         {
-            Title = $"新建作图 {workspace.Sessions.Count + 1}",
+            Title = $"{(workspace.Type == StudioWorkspace.CopyType ? "新建文案" : "新建作图")} {workspace.Sessions.Count + 1}",
         };
         workspace.Sessions.Insert(0, session);
         workspace.ActiveSessionId = session.Id;
@@ -1841,7 +1976,7 @@ public partial class Home
     {
         _cts?.Cancel();
         ClearAllReferenceInputs();
-        var workspace = ActiveGraphicWorkspace;
+        var workspace = ActiveWorkspace;
         workspace.ActiveSessionId = key;
         TouchWorkspace(workspace);
         _pendingPrompt = null;
@@ -1853,7 +1988,7 @@ public partial class Home
 
     private async Task RenameSession(XConversationRenameRequest request)
     {
-        var workspace = ActiveGraphicWorkspace;
+        var workspace = ActiveWorkspace;
         var session = workspace.Sessions.FirstOrDefault(item => item.Id == request.Key);
         if (session is null)
         {
@@ -1868,7 +2003,7 @@ public partial class Home
 
     private async Task DeleteSession(XConversationItem item)
     {
-        var workspace = ActiveGraphicWorkspace;
+        var workspace = ActiveWorkspace;
         if (workspace.Sessions.Count <= 1)
         {
             ResetActive();
@@ -1888,8 +2023,8 @@ public partial class Home
 
     private async Task ClearHistory()
     {
-        var session = new StudioSession();
-        var workspace = ActiveGraphicWorkspace;
+        var workspace = ActiveWorkspace;
+        var session = StudioWorkspace.CreateDefaultSession(workspace.Type);
         workspace.Sessions = [session];
         workspace.ActiveSessionId = session.Id;
         TouchWorkspace(workspace);
@@ -1901,7 +2036,15 @@ public partial class Home
 
     private async Task ClearResults()
     {
-        ActiveSession.Messages.RemoveAll(message => message.Images.Count > 0);
+        if (IsCopyWorkspace)
+        {
+            ActiveSession.Messages.Clear();
+        }
+        else
+        {
+            ActiveSession.Messages.RemoveAll(message => message.Images.Count > 0);
+        }
+
         ClearDownloadNotice();
         CloseImagePreview();
         TouchActiveSession();
@@ -1917,7 +2060,7 @@ public partial class Home
         ClearDownloadNotice();
         CloseImagePreview();
         ClearAllReferenceInputs();
-        TouchActiveSession("新建作图");
+        TouchActiveSession(IsCopyWorkspace ? "新建文案" : "新建作图");
     }
 
     private async Task SelectWorkspace(string workspaceId)
@@ -1929,6 +2072,12 @@ public partial class Home
         }
 
         ClearAllReferenceInputs();
+        if (workspace.Type == StudioWorkspace.CopyType)
+        {
+            _galleryOpen = false;
+            CloseImagePreview();
+        }
+
         _pendingPrompt = null;
         _error = null;
         ClearDownloadNotice();
@@ -1944,11 +2093,19 @@ public partial class Home
             return;
         }
 
+        if (workspace.Type == StudioWorkspace.CopyType)
+        {
+            _galleryOpen = false;
+            ClearAllReferenceInputs();
+            CloseImagePreview();
+        }
+
         await SaveAsync();
     }
 
     private Task NewWorkspace()
     {
+        _workspaceCreateType = StudioWorkspace.CopyType;
         _workspaceCreateName = BuildDefaultWorkspaceName();
         _workspaceCreateOpen = true;
         return Task.CompletedTask;
@@ -1960,13 +2117,27 @@ public partial class Home
         return Task.CompletedTask;
     }
 
+    private Task SetWorkspaceCreateType(string type)
+    {
+        _workspaceCreateType = StudioWorkspace.NormalizeType(type);
+        if (string.IsNullOrWhiteSpace(_workspaceCreateName) ||
+            IsDefaultWorkspaceName(_workspaceCreateName))
+        {
+            _workspaceCreateName = BuildDefaultWorkspaceName(_workspaceCreateType);
+        }
+
+        return Task.CompletedTask;
+    }
+
     private async Task CreateWorkspace()
     {
         var name = string.IsNullOrWhiteSpace(_workspaceCreateName)
-            ? BuildDefaultWorkspaceName()
+            ? BuildDefaultWorkspaceName(_workspaceCreateType)
             : _workspaceCreateName.Trim();
-        _snapshot.AddWorkspace(name);
+        _snapshot.AddWorkspace(name, _workspaceCreateType);
         _workspaceCreateOpen = false;
+        _galleryOpen = false;
+        ClearAllReferenceInputs();
         await SaveAsync();
     }
 
@@ -1976,11 +2147,21 @@ public partial class Home
         return Task.CompletedTask;
     }
 
-    private string BuildDefaultWorkspaceName()
+    private string BuildDefaultWorkspaceName(string? type = null)
     {
-        const string baseName = "平面设计";
-        var count = _snapshot.Workspaces.Count;
+        var normalizedType = StudioWorkspace.NormalizeType(type ?? _workspaceCreateType);
+        var baseName = StudioWorkspace.DefaultName(normalizedType);
+        var count = _snapshot.Workspaces.Count(workspace => StudioWorkspace.NormalizeType(workspace.Type) == normalizedType);
         return count == 0 ? baseName : $"{baseName} {count + 1}";
+    }
+
+    private static bool IsDefaultWorkspaceName(string name)
+    {
+        var trimmed = name.Trim();
+        return trimmed == StudioWorkspace.DefaultName(StudioWorkspace.GraphicType) ||
+            trimmed == StudioWorkspace.DefaultName(StudioWorkspace.CopyType) ||
+            trimmed.StartsWith($"{StudioWorkspace.DefaultName(StudioWorkspace.GraphicType)} ", StringComparison.Ordinal) ||
+            trimmed.StartsWith($"{StudioWorkspace.DefaultName(StudioWorkspace.CopyType)} ", StringComparison.Ordinal);
     }
 
     private async Task UsePrompt(string prompt)
@@ -3353,6 +3534,11 @@ public partial class Home
 
     private async Task AddReferenceFiles(InputFileChangeEventArgs args)
     {
+        if (!IsGraphicWorkspace)
+        {
+            return;
+        }
+
         const long maxFileSize = 12 * 1024 * 1024;
         ClearAllReferenceInputs();
         var maxFiles = ActiveSession.Mode == "variation" ? 1 : 16;

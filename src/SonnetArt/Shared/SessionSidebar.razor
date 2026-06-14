@@ -15,7 +15,7 @@
             <header class="history-header">
                 <div>
                     <h2>会话列表</h2>
-                    <p>平面设计 · @Items.Count 个会话 · 当前筛选 @FilterCountLabel</p>
+                    <p>@WorkspaceLabel · @Items.Count 个会话 · 当前筛选 @FilterCountLabel</p>
                 </div>
                 <div class="history-actions">
                     <button type="button" class="studio-button studio-button-light" title="新建会话" @onclick="OnNewSession">
@@ -56,6 +56,7 @@
     [Parameter] public string Class { get; set; } = "studio-sidebar";
     [Parameter] public bool Collapsed { get; set; }
     [Parameter] public EventCallback<bool> CollapsedChanged { get; set; }
+    [Parameter] public string WorkspaceLabel { get; set; } = "平面设计";
     [Parameter] public IReadOnlyList<XConversationItem> Items { get; set; } = [];
     [Parameter] public string? ActiveKey { get; set; }
     [Parameter] public EventCallback<string> ActiveKeyChanged { get; set; }

@@ -35,8 +35,9 @@
                 <SessionSidebar Class="@SidebarClass"
                                 Collapsed="@_leftSidebarCollapsed"
                                 CollapsedChanged="@SetLeftSidebarCollapsed"
+                                WorkspaceLabel="@ActiveWorkspaceLabel"
                                 Items="@ConversationItems"
-                                ActiveKey="@ActiveGraphicWorkspace.ActiveSessionId"
+                                ActiveKey="@ActiveWorkspace.ActiveSessionId"
                                 ActiveKeyChanged="@ActivateSession"
                                 OnRename="@RenameSession"
                                 OnDelete="@DeleteSession"
@@ -53,21 +54,31 @@
                         <span class="workspace-eyebrow">@ModeLabel</span>
                         <h2>@ActiveSession.Title</h2>
                         <p>@WorkspaceStatus</p>
+                        @if (IsCopyWorkspace)
+                        {
+                            <div class="copy-model-status" title="文案空间仅使用 GPT 5.5 或更新版本">
+                                <Icon Type="api" Theme="IconThemeType.Outline" />
+                                <span>大模型 @ChatModelDisplay</span>
+                            </div>
+                        }
                     </div>
                     <div class="workspace-actions">
-                        <button type="button" class="studio-button studio-button-light" @onclick="ToggleGallery">
-                            <Icon Type="@GalleryToggleIcon" Theme="IconThemeType.Outline" />
-                            <span>@GalleryToggleText</span>
-                        </button>
+                        @if (IsGraphicWorkspace)
+                        {
+                            <button type="button" class="studio-button studio-button-light" @onclick="ToggleGallery">
+                                <Icon Type="@GalleryToggleIcon" Theme="IconThemeType.Outline" />
+                                <span>@GalleryToggleText</span>
+                            </button>
+                        }
                         <button type="button" class="studio-button studio-button-light" @onclick="ClearResults">
                             <Icon Type="delete" Theme="IconThemeType.Outline" />
-                            <span>清空结果</span>
+                            <span>@ClearResultsText</span>
                         </button>
                     </div>
                 </section>
 
                 <section class="@CanvasClass">
-                    @if (_galleryOpen)
+                    @if (IsGraphicWorkspace && _galleryOpen)
                     {
                         <div class="gallery-workspace">
                             <div class="gallery-toolbar">
@@ -77,7 +88,7 @@
                                 </label>
                                 <select class="studio-select" value="@_gallerySessionFilter" @onchange="UpdateGallerySessionFilter" title="会话">
                                     <option value="all">全部会话</option>
-                                    @foreach (var session in ActiveGraphicWorkspace.Sessions.OrderByDescending(session => session.UpdatedAt))
+                                    @foreach (var session in ActiveWorkspace.Sessions.OrderByDescending(session => session.UpdatedAt))
                                     {
                                         <option value="@session.Id">@session.Title</option>
                                     }
@@ -198,12 +209,12 @@
                     else if (ActiveSession.Messages.Count == 0 && !_loading)
                     {
                         <div class="empty-canvas">
-                            <XWelcome Title="准备开始作图"
-                                      Description="在底部输入描述，生成结果会永久保存在当前会话。"
+                            <XWelcome Title="@EmptyTitle"
+                                      Description="@EmptyDescription"
                                       Class="studio-welcome">
                                 <IconTemplate>
                                     <div class="welcome-mark">
-                                        <Icon Type="picture" Theme="IconThemeType.Outline" />
+                                        <Icon Type="@EmptyIcon" Theme="IconThemeType.Outline" />
                                     </div>
                                 </IconTemplate>
                             </XWelcome>
@@ -296,7 +307,10 @@
                                     <div class="studio-loading inline-loading">
                                         <span></span>
                                         <strong>@_loadingLabel</strong>
-                                        <p>@QuickSettingsSummary · @CostAndDurationSummary</p>
+                                        @if (IsGraphicWorkspace)
+                                        {
+                                            <p>@QuickSettingsSummary · @CostAndDurationSummary</p>
+                                        }
                                     </div>
                                 </article>
                             }
@@ -316,7 +330,9 @@
                 }
 
                 <section class="workspace-chat">
-                    <details class="studio-advanced chat-advanced">
+                    @if (IsGraphicWorkspace)
+                    {
+                        <details class="studio-advanced chat-advanced">
                         <summary>
                             <span>高级</span>
                             <div class="quick-settings" @onclick:stopPropagation @onmousedown:stopPropagation>
@@ -562,19 +578,20 @@
                                   value="@Settings.AdvancedJson"
                                   @oninput="UpdateAdvancedJson"></textarea>
                         <small class="studio-helper advanced-json-helper">高级 JSON 只能覆盖当前模型真实支持的字段；旧模型、stream、partial_images、response_format、input_fidelity 会被忽略或归一化。</small>
-                    </details>
+                        </details>
+                    }
 
                     <XSender @bind-Value="_senderText"
-                             Placeholder="输入作图描述，按 Enter 生成..."
+                             Placeholder="@SenderPlaceholder"
                              Loading="@_loading"
                              Rows="2"
                              ClearAfterSubmit="false"
                              SubmitMode="XSenderSubmitMode.Enter"
                              Attachments="@_senderAttachments"
-                             Accept="image/*"
-                             MaxAttachments="16"
-                             UploadText="添加图片"
-                             AttachmentsPlaceholder="选择、拖入或粘贴图片"
+                             Accept="@SenderAccept"
+                             MaxAttachments="@SenderMaxAttachments"
+                             UploadText="@SenderUploadText"
+                             AttachmentsPlaceholder="@SenderAttachmentsPlaceholder"
                              BeforeUpload="@BeforeSenderUpload"
                              OnFilesSelected="@AddSenderFiles"
                              OnAttachmentRemove="@RemoveSenderAttachment"
@@ -597,7 +614,9 @@
 
     <WorkspaceCreateDialog Open="@_workspaceCreateOpen"
                            Name="@_workspaceCreateName"
+                           Type="@_workspaceCreateType"
                            NameChanged="@SetWorkspaceCreateName"
+                           TypeChanged="@SetWorkspaceCreateType"
                            OnCreate="@CreateWorkspace"
                            OnCancel="@CloseWorkspaceCreate" />
 

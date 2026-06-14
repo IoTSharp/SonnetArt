@@ -79,6 +79,7 @@ public sealed class StudioSettings
         EmbeddedLanguage = NormalizeEmbeddedLanguage(EmbeddedLanguage);
         EmbeddedSourceHost = EmbeddedSourceHost?.Trim() ?? string.Empty;
         EmbeddedSourceUrl = EmbeddedSourceUrl?.Trim() ?? string.Empty;
+        ChatModel = NormalizeChatModel(ChatModel);
         PromptPolishMode = NormalizePromptPolishMode(PromptPolishMode);
         AspectRatio = NormalizeAspectRatio(AspectRatio);
         ResolutionTier = NormalizeResolutionTier(ResolutionTier);
@@ -127,6 +128,68 @@ public sealed class StudioSettings
             "auto" => "auto",
             _ => "direct",
         };
+    }
+
+    public static string NormalizeChatModel(string? value)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "gpt-5.5";
+        }
+
+        if (TryParseGptVersion(normalized, out var major, out var minor) &&
+            (major > 5 || major == 5 && minor >= 5))
+        {
+            return $"gpt-{major}.{minor}";
+        }
+
+        return "gpt-5.5";
+    }
+
+    private static bool TryParseGptVersion(string value, out int major, out int minor)
+    {
+        major = 0;
+        minor = 0;
+
+        var lower = value.Trim().ToLowerInvariant();
+        if (!lower.StartsWith("gpt", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var versionStart = 3;
+        while (versionStart < lower.Length && (lower[versionStart] == '-' || lower[versionStart] == ' '))
+        {
+            versionStart++;
+        }
+
+        var majorEnd = versionStart;
+        while (majorEnd < lower.Length && char.IsDigit(lower[majorEnd]))
+        {
+            majorEnd++;
+        }
+
+        if (majorEnd == versionStart ||
+            !int.TryParse(lower.AsSpan(versionStart, majorEnd - versionStart), out major))
+        {
+            return false;
+        }
+
+        if (majorEnd >= lower.Length || lower[majorEnd] != '.')
+        {
+            return true;
+        }
+
+        var minorStart = majorEnd + 1;
+        var minorEnd = minorStart;
+        while (minorEnd < lower.Length && char.IsDigit(lower[minorEnd]))
+        {
+            minorEnd++;
+        }
+
+        return minorEnd > minorStart &&
+            int.TryParse(lower.AsSpan(minorStart, minorEnd - minorStart), out minor);
     }
 
     public static string NormalizeAspectRatio(string? value)
@@ -217,7 +280,11 @@ public sealed class GeneratedImage
 
 public sealed class StudioWorkspace
 {
+    public const string GraphicType = "graphic";
+    public const string CopyType = "copy";
+
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Type { get; set; } = GraphicType;
     public string Name { get; set; } = "平面设计";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
@@ -225,12 +292,14 @@ public sealed class StudioWorkspace
     public List<StudioSession> Sessions { get; set; } = [];
     public string? ActiveSessionId { get; set; }
 
-    public static StudioWorkspace Create(string? name = null)
+    public static StudioWorkspace Create(string? name = null, string? type = null)
     {
         var now = DateTimeOffset.Now;
+        var normalizedType = NormalizeType(type);
         var workspace = new StudioWorkspace
         {
-            Name = string.IsNullOrWhiteSpace(name) ? "平面设计" : name.Trim(),
+            Type = normalizedType,
+            Name = string.IsNullOrWhiteSpace(name) ? DefaultName(normalizedType) : name.Trim(),
             CreatedAt = now,
             UpdatedAt = now,
             LastOpenedAt = now,
@@ -246,12 +315,13 @@ public sealed class StudioWorkspace
             Id = Guid.NewGuid().ToString("N");
         }
 
-        Name = string.IsNullOrWhiteSpace(Name) ? "平面设计" : Name.Trim();
+        Type = NormalizeType(Type);
+        Name = string.IsNullOrWhiteSpace(Name) ? DefaultName(Type) : Name.Trim();
         Sessions ??= [];
 
         if (Sessions.Count == 0)
         {
-            var session = new StudioSession();
+            var session = CreateDefaultSession(Type);
             Sessions.Add(session);
             ActiveSessionId = session.Id;
         }
@@ -264,6 +334,28 @@ public sealed class StudioWorkspace
                 .First()
                 .Id;
         }
+    }
+
+    public static string NormalizeType(string? type)
+    {
+        return type?.Trim().ToLowerInvariant() switch
+        {
+            CopyType => CopyType,
+            _ => GraphicType,
+        };
+    }
+
+    public static string DefaultName(string? type)
+    {
+        return NormalizeType(type) == CopyType ? "文案空间" : "平面设计";
+    }
+
+    public static StudioSession CreateDefaultSession(string? type)
+    {
+        return new StudioSession
+        {
+            Title = NormalizeType(type) == CopyType ? "新建文案" : "新建作图",
+        };
     }
 }
 
@@ -357,10 +449,10 @@ public sealed class StudioSnapshot
         return workspace;
     }
 
-    public StudioWorkspace AddWorkspace(string? name = null)
+    public StudioWorkspace AddWorkspace(string? name = null, string? type = null)
     {
         Normalize();
-        var workspace = StudioWorkspace.Create(name);
+        var workspace = StudioWorkspace.Create(name, type);
         Workspaces.Add(workspace);
         ActiveWorkspaceId = workspace.Id;
         SyncLegacyFieldsFromWorkspaces();
