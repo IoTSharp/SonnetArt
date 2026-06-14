@@ -217,7 +217,55 @@ internal static class StudioSnapshotLocalStorageCompactor
             PlannedCount = node.PlannedCount,
             GeneratedImageIds = node.GeneratedImageIds.Take(96).Select(id => LimitText(id, 64)).ToList(),
             SelectedImageId = LimitText(node.SelectedImageId, 64),
+            CompareImageId = LimitText(node.CompareImageId, 64),
+            Iterations = node.Iterations
+                .Take(48)
+                .Select(CopyCommerceImageIteration)
+                .ToList(),
+            SelectedIterationId = LimitText(node.SelectedIterationId, 64),
+            VariantApplications = node.VariantApplications
+                .Take(96)
+                .Select(CopyCommerceVariantApplication)
+                .ToList(),
+            SelectedVariantApplicationId = LimitText(node.SelectedVariantApplicationId, 64),
             LastGeneratedAt = node.LastGeneratedAt,
+        };
+    }
+
+    private static CommerceImageIteration CopyCommerceImageIteration(CommerceImageIteration iteration)
+    {
+        return new CommerceImageIteration
+        {
+            Id = iteration.Id,
+            Name = LimitText(iteration.Name, 128),
+            Mode = LimitText(iteration.Mode, 32),
+            Label = LimitText(iteration.Label, 32),
+            SourceImageId = LimitText(iteration.SourceImageId, 64),
+            ResultImageIds = iteration.ResultImageIds.Take(12).Select(id => LimitText(id, 64)).ToList(),
+            SelectedImageId = LimitText(iteration.SelectedImageId, 64),
+            Prompt = LimitText(iteration.Prompt, MaxPromptChars),
+            CreatedAt = iteration.CreatedAt,
+        };
+    }
+
+    private static CommerceVariantApplication CopyCommerceVariantApplication(CommerceVariantApplication application)
+    {
+        return new CommerceVariantApplication
+        {
+            Id = application.Id,
+            VariantId = LimitText(application.VariantId, 64),
+            VariantName = LimitText(application.VariantName, 128),
+            Sku = LimitText(application.Sku, 128),
+            Color = LimitText(application.Color, 96),
+            Material = LimitText(application.Material, 128),
+            Size = LimitText(application.Size, 96),
+            Package = LimitText(application.Package, 128),
+            SourceImageId = LimitText(application.SourceImageId, 64),
+            ResultImageIds = application.ResultImageIds.Take(12).Select(id => LimitText(id, 64)).ToList(),
+            SelectedImageId = LimitText(application.SelectedImageId, 64),
+            Prompt = LimitText(application.Prompt, MaxPromptChars),
+            Status = LimitText(application.Status, 64),
+            CreatedAt = application.CreatedAt,
         };
     }
 

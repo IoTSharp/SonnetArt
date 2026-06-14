@@ -74,7 +74,8 @@
 
                 <label class="studio-field">
                     <span class="studio-label">SKU 变体</span>
-                    <textarea class="studio-textarea" value="@SkuVariants" @oninput="SkuVariantsChanged" placeholder="每行一个：名称 | 颜色 | SKU，例如：&#10;晨雾白 | 白色 | CUP-WHITE-600&#10;松石绿 | 绿色 | CUP-GREEN-600"></textarea>
+                    <textarea class="studio-textarea" value="@SkuVariants" @oninput="SkuVariantsChanged" placeholder="每行一个：名称 | 颜色 | 材质 | 尺寸 | 套装 | SKU，例如：&#10;晨雾白 | 白色 | 316 不锈钢 | 600ml | 单杯装 | CUP-WHITE-600&#10;松石绿 | 绿色 | 316 不锈钢 | 600ml | 双杯套装 | CUP-GREEN-SET"></textarea>
+                    <small class="studio-helper">旧格式“名称 | 颜色 | SKU”仍可直接使用。</small>
                 </label>
             </div>
 

@@ -256,8 +256,11 @@
                 <button type="button" class="commerce-icon-button" title="生成全部启用节点" disabled="@(!CanGenerateAllNodes)" @onclick="OnGenerateAllNodes">
                     <Icon Type="thunderbolt" Theme="IconThemeType.Outline" />
                 </button>
+                <button type="button" class="commerce-icon-button" title="导出 ZIP" disabled="@(!CanExportPackage)" @onclick="OnExportPackage">
+                    <Icon Type="file-zip" Theme="IconThemeType.Outline" />
+                </button>
                 <button type="button" class="commerce-icon-button" title="导出规划书" disabled="@(ActivePlan is null)" @onclick="OnExportPlan">
-                    <Icon Type="download" Theme="IconThemeType.Outline" />
+                    <Icon Type="file-markdown" Theme="IconThemeType.Outline" />
                 </button>
             </div>
         </header>
@@ -283,23 +286,156 @@
                 <p class="commerce-result-note">最近生成 @SelectedNode.LastGeneratedAt.Value.ToLocalTime().ToString("MM-dd HH:mm")</p>
             }
 
+            <section class="commerce-export-controls" aria-label="轻量导出">
+                <div class="commerce-export-control-grid">
+                    <label>
+                        <span>平台</span>
+                        <select value="@ExportPlatform" @onchange="OnExportPlatformChanged">
+                            @foreach (var option in ExportPlatformOptions)
+                            {
+                                <option value="@option.Value">@option.Label</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        <span>范围</span>
+                        <select value="@ExportScope" @onchange="OnExportScopeChanged">
+                            @foreach (var option in ExportScopeOptions)
+                            {
+                                <option value="@option.Value">@option.Label</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        <span>图片</span>
+                        <select value="@ExportImageSelection" @onchange="OnExportImageSelectionChanged">
+                            @foreach (var option in ExportImageSelectionOptions)
+                            {
+                                <option value="@option.Value">@option.Label</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        <span>分辨率</span>
+                        <select value="@ExportResolutionTier" @onchange="OnExportResolutionTierChanged">
+                            @foreach (var option in ExportResolutionOptions)
+                            {
+                                <option value="@option.Value">@option.Label</option>
+                            }
+                        </select>
+                    </label>
+                </div>
+                <label class="commerce-export-pattern">
+                    <span>命名规则</span>
+                    <input value="@ExportFileNamePattern" @oninput="OnExportFileNamePatternChanged" />
+                </label>
+                <button type="button" class="studio-button studio-button-primary" disabled="@(!CanExportPackage)" @onclick="OnExportPackage">
+                    <Icon Type="file-zip" Theme="IconThemeType.Outline" />
+                    <span>导出 ZIP</span>
+                </button>
+            </section>
+
             @if (SelectedNode is not null)
             {
                 <div class="commerce-iteration-strip" aria-label="创意迭代">
                     <span>创意迭代</span>
-                    <button type="button" title="派生光影版本" disabled="@(!CanIterateSelectedImage)" @onclick='() => OnIterateSelectedImage.InvokeAsync("lighting")'>
+                    <button type="button" title="派生光影版本" disabled="@(!CanIterateSelectedImage)" @onclick='() => StartCreativeIteration("lighting")'>
                         <Icon Type="bulb" Theme="IconThemeType.Outline" />
                     </button>
-                    <button type="button" title="派生质感版本" disabled="@(!CanIterateSelectedImage)" @onclick='() => OnIterateSelectedImage.InvokeAsync("texture")'>
+                    <button type="button" title="派生质感版本" disabled="@(!CanIterateSelectedImage)" @onclick='() => StartCreativeIteration("texture")'>
                         <Icon Type="skin" Theme="IconThemeType.Outline" />
                     </button>
-                    <button type="button" title="派生风格版本" disabled="@(!CanIterateSelectedImage)" @onclick='() => OnIterateSelectedImage.InvokeAsync("style")'>
+                    <button type="button" title="派生风格版本" disabled="@(!CanIterateSelectedImage)" @onclick='() => StartCreativeIteration("style")'>
                         <Icon Type="bg-colors" Theme="IconThemeType.Outline" />
                     </button>
-                    <button type="button" title="派生详情页表达" disabled="@(!CanIterateSelectedImage)" @onclick='() => OnIterateSelectedImage.InvokeAsync("detail")'>
+                    <button type="button" title="派生详情页表达" disabled="@(!CanIterateSelectedImage)" @onclick='() => StartCreativeIteration("detail")'>
                         <Icon Type="appstore" Theme="IconThemeType.Outline" />
                     </button>
                 </div>
+
+                <div class="commerce-variant-apply" aria-label="变体套用">
+                    <div>
+                        <span>变体套用</span>
+                        <strong>@VariantApplySummary</strong>
+                    </div>
+                    <button type="button" class="studio-button studio-button-light" disabled="@(!CanApplyVariants)" @onclick="OnApplyVariants">
+                        <Icon Type="deployment-unit" Theme="IconThemeType.Outline" />
+                        <span>套用 SKU</span>
+                    </button>
+                </div>
+
+                @if (SelectedNode.VariantApplications.Count > 0)
+                {
+                    <section class="commerce-variant-list" aria-label="SKU 变体归档">
+                        @foreach (var application in SelectedNode.VariantApplications)
+                        {
+                            <article class="@VariantItemClass(application)">
+                                <div>
+                                    <strong>@VariantApplicationTitle(application)</strong>
+                                    <span>@VariantApplicationMeta(application)</span>
+                                </div>
+                                <em>@application.ResultImageIds.Count 张</em>
+                            </article>
+                        }
+                    </section>
+                }
+
+                <label class="commerce-iteration-name">
+                    <span>版本命名</span>
+                    <input value="@_iterationName" placeholder="@DefaultIterationName" @oninput="UpdateIterationName" />
+                </label>
+
+                @if (SelectedNode.Iterations.Count > 0)
+                {
+                    <section class="commerce-version-list" aria-label="迭代版本">
+                        @foreach (var iteration in SelectedNode.Iterations)
+                        {
+                            <article class="@IterationItemClass(iteration)">
+                                <button type="button" title="查看此版本" @onclick="() => OnSelectIteration.InvokeAsync(iteration.Id)">
+                                    <strong>@iteration.Name</strong>
+                                    <span>@IterationMeta(iteration)</span>
+                                </button>
+                                <input value="@iteration.Name"
+                                       title="重命名版本"
+                                       @onchange="args => RenameIteration(iteration, args)" />
+                            </article>
+                        }
+                    </section>
+                }
+
+                @if (SelectedImageForCompare is not null || CompareImage is not null)
+                {
+                    <section class="commerce-version-compare" aria-label="版本对比">
+                        <figure>
+                            <span>对比基准</span>
+                            @if (CompareImage is not null)
+                            {
+                                <button type="button" title="打开基准图" @onclick="() => OnPreviewImage.InvokeAsync(CompareImage)">
+                                    <img src="@CompareImage.Url" alt="对比基准" />
+                                </button>
+                                <figcaption>@ImageMeta(CompareImage)</figcaption>
+                            }
+                            else
+                            {
+                                <div class="commerce-compare-empty">未选择</div>
+                            }
+                        </figure>
+                        <figure>
+                            <span>当前选片</span>
+                            @if (SelectedImageForCompare is not null)
+                            {
+                                <button type="button" title="打开当前选片" @onclick="() => OnPreviewImage.InvokeAsync(SelectedImageForCompare)">
+                                    <img src="@SelectedImageForCompare.Url" alt="当前选片" />
+                                </button>
+                                <figcaption>@ImageMeta(SelectedImageForCompare)</figcaption>
+                            }
+                            else
+                            {
+                                <div class="commerce-compare-empty">未选择</div>
+                            }
+                        </figure>
+                    </section>
+                }
             }
 
             @if (NodeImages.Count == 0)
@@ -327,6 +463,9 @@
                                 <button type="button" title="设为选片" @onclick="() => OnSelectImage.InvokeAsync(image)">
                                     <Icon Type="check-circle" Theme="@(IsSelectedImage(image) ? IconThemeType.Fill : IconThemeType.Outline)" />
                                 </button>
+                                <button type="button" title="设为对比基准" @onclick="() => OnSelectCompareImage.InvokeAsync(image)">
+                                    <Icon Type="swap" Theme="@(IsCompareImage(image) ? IconThemeType.Fill : IconThemeType.Outline)" />
+                                </button>
                                 <button type="button" title="收藏" @onclick="() => OnToggleImageFavorite.InvokeAsync(image)">
                                     <Icon Type="star" Theme="@(image.IsFavorite ? IconThemeType.Fill : IconThemeType.Outline)" />
                                 </button>
@@ -353,10 +492,10 @@
         </div>
 
         <div class="commerce-export-list">
-            <span>Amazon · @PlanImages.Count</span>
-            <span>Shopee · @PlanImages.Count</span>
-            <span>Shopify · @PlanImages.Count</span>
-            <span>独立站 · @PlanImages.Count</span>
+            @foreach (var option in ExportPlatformOptions)
+            {
+                <span>@option.Label · @PlanImages.Count</span>
+            }
         </div>
     </aside>
 </div>
@@ -373,6 +512,13 @@
     [Parameter] public bool CanAnalyzeProduct { get; set; }
     [Parameter] public bool CanGenerateAllNodes { get; set; }
     [Parameter] public bool CanIterateSelectedImage { get; set; }
+    [Parameter] public bool CanApplyVariants { get; set; }
+    [Parameter] public bool CanExportPackage { get; set; }
+    [Parameter] public string ExportPlatform { get; set; } = "amazon";
+    [Parameter] public string ExportScope { get; set; } = "plan";
+    [Parameter] public string ExportImageSelection { get; set; } = "selected-or-all";
+    [Parameter] public string ExportResolutionTier { get; set; } = "source";
+    [Parameter] public string ExportFileNamePattern { get; set; } = "{sku}-{node}-{index}";
     [Parameter] public string? AnalysisMessage { get; set; }
     [Parameter] public bool AnalysisMessageIsError { get; set; }
     [Parameter] public EventCallback OnNewProduct { get; set; }
@@ -387,7 +533,17 @@
     [Parameter] public EventCallback<CommerceImageNode> OnApplyNode { get; set; }
     [Parameter] public EventCallback<CommerceImageNode> OnGenerateNode { get; set; }
     [Parameter] public EventCallback OnGenerateAllNodes { get; set; }
-    [Parameter] public EventCallback<string> OnIterateSelectedImage { get; set; }
+    [Parameter] public EventCallback<CommerceIterationRequest> OnIterateSelectedImage { get; set; }
+    [Parameter] public EventCallback OnApplyVariants { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> OnExportPlatformChanged { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> OnExportScopeChanged { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> OnExportImageSelectionChanged { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> OnExportResolutionTierChanged { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> OnExportFileNamePatternChanged { get; set; }
+    [Parameter] public EventCallback OnExportPackage { get; set; }
+    [Parameter] public EventCallback<GeneratedImage> OnSelectCompareImage { get; set; }
+    [Parameter] public EventCallback<CommerceIterationRenameRequest> OnRenameIteration { get; set; }
+    [Parameter] public EventCallback<string> OnSelectIteration { get; set; }
     [Parameter] public EventCallback OnExportPlan { get; set; }
     [Parameter] public EventCallback<GeneratedImage> OnSelectImage { get; set; }
     [Parameter] public EventCallback<GeneratedImage> OnToggleImageFavorite { get; set; }
@@ -399,6 +555,35 @@
     [Parameter] public EventCallback<GeneratedImage> OnDownloadImage { get; set; }
 
     private static readonly string[] AspectRatioOptions = ["auto", "1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9", "21:9"];
+    private static readonly ExportOption[] ExportPlatformOptions =
+    [
+        new("amazon", "Amazon"),
+        new("ozon", "Ozon"),
+        new("mercado-libre", "Mercado Libre"),
+        new("shopee", "Shopee"),
+        new("shopify", "Shopify"),
+        new("independent", "独立站"),
+    ];
+    private static readonly ExportOption[] ExportScopeOptions =
+    [
+        new("plan", "整套方案"),
+        new("node", "当前节点"),
+        new("favorites", "已选片"),
+    ];
+    private static readonly ExportOption[] ExportImageSelectionOptions =
+    [
+        new("selected-or-all", "选片优先"),
+        new("selected", "仅选片"),
+        new("all", "全部图片"),
+    ];
+    private static readonly ExportOption[] ExportResolutionOptions =
+    [
+        new("source", "原始"),
+        new("1k", "1K"),
+        new("2k", "2K"),
+        new("4k", "2MP"),
+        new("8mp", "8MP"),
+    ];
 
     private string? _draftNodeId;
     private string _nodeType = "main";
@@ -412,12 +597,13 @@
     private string _nodeNegativePrompt = string.Empty;
     private bool _nodeEnabled = true;
     private int _nodePlannedCount = 4;
+    private string _iterationName = string.Empty;
 
     private CommerceImageNode? EditableNode => SelectedNode ?? ActivePlan?.Nodes.FirstOrDefault();
 
     private string ProductCoreText => ActiveProduct is null
         ? "导入商品后，主图、场景图、细节图、对比图、尺寸图和 A+ 图会围绕商品事实展开。"
-        : $"{ActiveProduct.SellingPoints.Count} 个卖点，{ActiveProduct.SkuVariants.Count} 个 SKU，{ActiveProduct.ReferenceImages.Count} 张产品参考图，{(ActiveProduct.Analysis.HasContent ? "已分析" : "待分析")}。";
+        : $"{ActiveProduct.SellingPoints.Count} 个卖点，{ActiveProduct.SkuVariants.Count} 个 SKU，{SkuDimensionCount(ActiveProduct)} 个变体维度，{ActiveProduct.ReferenceImages.Count} 张产品参考图，{(ActiveProduct.Analysis.HasContent ? "已分析" : "待分析")}。";
 
     private IReadOnlyList<AnalysisGroup> AnalysisGroups => ActiveProduct?.Analysis is null
         ? []
@@ -439,6 +625,7 @@
         if (!string.Equals(_draftNodeId, EditableNode?.Id, StringComparison.Ordinal))
         {
             ResetNodeDraft();
+            _iterationName = string.Empty;
         }
     }
 
@@ -484,6 +671,26 @@
     private bool IsSelectedImage(GeneratedImage image) =>
         string.Equals(SelectedNode?.SelectedImageId, image.Id, StringComparison.Ordinal);
 
+    private bool IsCompareImage(GeneratedImage image) =>
+        string.Equals(SelectedNode?.CompareImageId, image.Id, StringComparison.Ordinal);
+
+    private GeneratedImage? SelectedImageForCompare =>
+        SelectedNode is null
+            ? null
+            : NodeImages.FirstOrDefault(image => string.Equals(image.Id, SelectedNode.SelectedImageId, StringComparison.Ordinal));
+
+    private GeneratedImage? CompareImage =>
+        SelectedNode is null || string.IsNullOrWhiteSpace(SelectedNode.CompareImageId)
+            ? null
+            : NodeImages.FirstOrDefault(image => string.Equals(image.Id, SelectedNode.CompareImageId, StringComparison.Ordinal));
+
+    private string DefaultIterationName =>
+        SelectedNode is null ? "新版本" : $"版本 {SelectedNode.Iterations.Count + 1}";
+
+    private string VariantApplySummary => ActiveProduct is null
+        ? "等待商品 SKU"
+        : $"{ActiveProduct.SkuVariants.Count} 个 SKU · {SelectedNode?.VariantApplications.Count ?? 0} 个已归档";
+
     private static string ImageTitle(GeneratedImage image) =>
         string.IsNullOrWhiteSpace(image.RequestSummary)
             ? image.Model
@@ -491,6 +698,60 @@
 
     private static string ImageMeta(GeneratedImage image) =>
         $"{image.CreatedAt.ToLocalTime():MM-dd HH:mm} · {image.AspectRatio} · {image.Size}";
+
+    private string IterationItemClass(CommerceImageIteration iteration) =>
+        string.Equals(SelectedNode?.SelectedIterationId, iteration.Id, StringComparison.Ordinal)
+            ? "commerce-version-item active"
+            : "commerce-version-item";
+
+    private static string IterationMeta(CommerceImageIteration iteration) =>
+        $"{iteration.Label} · {iteration.CreatedAt.ToLocalTime():MM-dd HH:mm} · {iteration.ResultImageIds.Count} 张";
+
+    private string VariantItemClass(CommerceVariantApplication application) =>
+        string.Equals(SelectedNode?.SelectedVariantApplicationId, application.Id, StringComparison.Ordinal)
+            ? "commerce-variant-item active"
+            : "commerce-variant-item";
+
+    private static string VariantApplicationTitle(CommerceVariantApplication application)
+    {
+        if (!string.IsNullOrWhiteSpace(application.Sku))
+        {
+            return application.Sku;
+        }
+
+        if (!string.IsNullOrWhiteSpace(application.VariantName))
+        {
+            return application.VariantName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(application.Color))
+        {
+            return application.Color;
+        }
+
+        return "未命名 SKU";
+    }
+
+    private static string VariantApplicationMeta(CommerceVariantApplication application)
+    {
+        var facts = new[]
+        {
+            application.VariantName,
+            application.Color,
+            application.Material,
+            application.Size,
+            application.Package,
+        }.Where(value => !string.IsNullOrWhiteSpace(value));
+        var factText = string.Join(" · ", facts);
+        return string.IsNullOrWhiteSpace(factText)
+            ? $"{application.CreatedAt.ToLocalTime():MM-dd HH:mm} · 母版 {ShortId(application.SourceImageId)}"
+            : $"{factText} · {application.CreatedAt.ToLocalTime():MM-dd HH:mm}";
+    }
+
+    private static string ShortId(string value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? "无"
+            : value.Length <= 8 ? value : value[..8];
 
     private static string ReferenceRoleLabel(string role) =>
         role switch
@@ -556,6 +817,18 @@
     private void UpdateNodePrompt(ChangeEventArgs args) => _nodePrompt = args.Value?.ToString() ?? string.Empty;
     private void UpdateNodeNegativePrompt(ChangeEventArgs args) => _nodeNegativePrompt = args.Value?.ToString() ?? string.Empty;
     private void UpdateNodeEnabled(ChangeEventArgs args) => _nodeEnabled = args.Value is bool value && value;
+    private void UpdateIterationName(ChangeEventArgs args) => _iterationName = args.Value?.ToString() ?? string.Empty;
+
+    private async Task StartCreativeIteration(string mode)
+    {
+        await OnIterateSelectedImage.InvokeAsync(new CommerceIterationRequest(mode, _iterationName));
+        _iterationName = string.Empty;
+    }
+
+    private async Task RenameIteration(CommerceImageIteration iteration, ChangeEventArgs args)
+    {
+        await OnRenameIteration.InvokeAsync(new CommerceIterationRenameRequest(iteration.Id, args.Value?.ToString() ?? string.Empty));
+    }
     private void UpdateNodePlannedCount(ChangeEventArgs args)
     {
         if (int.TryParse(args.Value?.ToString(), out var value))
@@ -580,7 +853,34 @@
     }
 
     private static string ProductMeta(CommerceProduct product) =>
-        $"{product.SellingPoints.Count} 个卖点 · {product.SkuVariants.Count} 个 SKU · {product.ReferenceImages.Count} 张参考图 · {(product.Analysis.HasContent ? "已分析" : "待分析")}";
+        $"{product.SellingPoints.Count} 个卖点 · {product.SkuVariants.Count} 个 SKU · {SkuDimensionCount(product)} 个维度 · {product.ReferenceImages.Count} 张参考图 · {(product.Analysis.HasContent ? "已分析" : "待分析")}";
+
+    private static int SkuDimensionCount(CommerceProduct product)
+    {
+        var count = 0;
+        if (product.SkuVariants.Any(variant => !string.IsNullOrWhiteSpace(variant.Color)))
+        {
+            count++;
+        }
+
+        if (product.SkuVariants.Any(variant => !string.IsNullOrWhiteSpace(variant.Material)))
+        {
+            count++;
+        }
+
+        if (product.SkuVariants.Any(variant => !string.IsNullOrWhiteSpace(variant.Size)))
+        {
+            count++;
+        }
+
+        if (product.SkuVariants.Any(variant => !string.IsNullOrWhiteSpace(variant.Package)))
+        {
+            count++;
+        }
+
+        return count;
+    }
 
     private sealed record AnalysisGroup(string Title, IReadOnlyList<string> Items);
+    private sealed record ExportOption(string Value, string Label);
 }

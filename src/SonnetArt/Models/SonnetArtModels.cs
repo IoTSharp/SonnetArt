@@ -511,6 +511,9 @@ public sealed class CommerceSkuVariant
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = string.Empty;
     public string Color { get; set; } = string.Empty;
+    public string Material { get; set; } = string.Empty;
+    public string Size { get; set; } = string.Empty;
+    public string Package { get; set; } = string.Empty;
     public string Sku { get; set; } = string.Empty;
 
     public void Normalize()
@@ -522,6 +525,9 @@ public sealed class CommerceSkuVariant
 
         Name = Name?.Trim() ?? string.Empty;
         Color = Color?.Trim() ?? string.Empty;
+        Material = Material?.Trim() ?? string.Empty;
+        Size = Size?.Trim() ?? string.Empty;
+        Package = Package?.Trim() ?? string.Empty;
         Sku = Sku?.Trim() ?? string.Empty;
     }
 }
@@ -575,6 +581,11 @@ public sealed class CommerceImageNode
     public int PlannedCount { get; set; } = 4;
     public List<string> GeneratedImageIds { get; set; } = [];
     public string? SelectedImageId { get; set; }
+    public string? CompareImageId { get; set; }
+    public List<CommerceImageIteration> Iterations { get; set; } = [];
+    public string? SelectedIterationId { get; set; }
+    public List<CommerceVariantApplication> VariantApplications { get; set; } = [];
+    public string? SelectedVariantApplicationId { get; set; }
     public DateTimeOffset? LastGeneratedAt { get; set; }
 
     public void Normalize()
@@ -608,7 +619,206 @@ public sealed class CommerceImageNode
             !GeneratedImageIds.Contains(SelectedImageId, StringComparer.Ordinal)
                 ? GeneratedImageIds.LastOrDefault()
                 : SelectedImageId.Trim();
+        CompareImageId = string.IsNullOrWhiteSpace(CompareImageId) ||
+            !GeneratedImageIds.Contains(CompareImageId, StringComparer.Ordinal)
+                ? GeneratedImageIds.FirstOrDefault(id => !string.Equals(id, SelectedImageId, StringComparison.Ordinal))
+                : CompareImageId.Trim();
+        Iterations ??= [];
+
+        foreach (var iteration in Iterations)
+        {
+            iteration.Normalize(GeneratedImageIds);
+        }
+
+        Iterations = Iterations
+            .Where(iteration => iteration.ResultImageIds.Count > 0)
+            .OrderByDescending(iteration => iteration.CreatedAt)
+            .Take(48)
+            .ToList();
+        SelectedIterationId = string.IsNullOrWhiteSpace(SelectedIterationId) ||
+            Iterations.All(iteration => iteration.Id != SelectedIterationId)
+                ? Iterations.FirstOrDefault()?.Id
+                : SelectedIterationId.Trim();
+        VariantApplications ??= [];
+
+        foreach (var application in VariantApplications)
+        {
+            application.Normalize(GeneratedImageIds);
+        }
+
+        VariantApplications = VariantApplications
+            .Where(application => application.ResultImageIds.Count > 0 || application.Status == "生成中")
+            .OrderByDescending(application => application.CreatedAt)
+            .Take(96)
+            .ToList();
+        SelectedVariantApplicationId = string.IsNullOrWhiteSpace(SelectedVariantApplicationId) ||
+            VariantApplications.All(application => application.Id != SelectedVariantApplicationId)
+                ? VariantApplications.FirstOrDefault()?.Id
+                : SelectedVariantApplicationId.Trim();
     }
+}
+
+public sealed class CommerceImageIteration
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = string.Empty;
+    public string Mode { get; set; } = "lighting";
+    public string Label { get; set; } = "光影";
+    public string SourceImageId { get; set; } = string.Empty;
+    public List<string> ResultImageIds { get; set; } = [];
+    public string? SelectedImageId { get; set; }
+    public string Prompt { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
+
+    public void Normalize(IReadOnlyList<string>? nodeImageIds = null)
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            Id = Guid.NewGuid().ToString("N");
+        }
+
+        Mode = NormalizeMode(Mode);
+        Label = string.IsNullOrWhiteSpace(Label) ? ModeLabel(Mode) : Label.Trim();
+        Name = string.IsNullOrWhiteSpace(Name) ? $"{Label}版本" : Name.Trim();
+        SourceImageId = SourceImageId?.Trim() ?? string.Empty;
+        Prompt = Prompt?.Trim() ?? string.Empty;
+        var imageIds = nodeImageIds?.ToHashSet(StringComparer.Ordinal);
+        ResultImageIds = ResultImageIds?
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Where(id => imageIds is null || imageIds.Contains(id))
+            .Distinct(StringComparer.Ordinal)
+            .Take(12)
+            .ToList() ?? [];
+        SelectedImageId = string.IsNullOrWhiteSpace(SelectedImageId) ||
+            !ResultImageIds.Contains(SelectedImageId, StringComparer.Ordinal)
+                ? ResultImageIds.LastOrDefault()
+                : SelectedImageId.Trim();
+    }
+
+    public static string NormalizeMode(string? mode)
+    {
+        return mode?.Trim().ToLowerInvariant() switch
+        {
+            "texture" => "texture",
+            "style" => "style",
+            "detail" => "detail",
+            _ => "lighting",
+        };
+    }
+
+    public static string ModeLabel(string? mode)
+    {
+        return NormalizeMode(mode) switch
+        {
+            "texture" => "质感",
+            "style" => "风格",
+            "detail" => "详情",
+            _ => "光影",
+        };
+    }
+}
+
+public sealed record CommerceIterationRequest(string Mode, string Name);
+
+public sealed record CommerceIterationRenameRequest(string IterationId, string Name);
+
+public sealed class CommerceVariantApplication
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string VariantId { get; set; } = string.Empty;
+    public string VariantName { get; set; } = string.Empty;
+    public string Sku { get; set; } = string.Empty;
+    public string Color { get; set; } = string.Empty;
+    public string Material { get; set; } = string.Empty;
+    public string Size { get; set; } = string.Empty;
+    public string Package { get; set; } = string.Empty;
+    public string SourceImageId { get; set; } = string.Empty;
+    public List<string> ResultImageIds { get; set; } = [];
+    public string? SelectedImageId { get; set; }
+    public string Prompt { get; set; } = string.Empty;
+    public string Status { get; set; } = "已生成";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
+
+    public void Normalize(IReadOnlyList<string>? nodeImageIds = null)
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            Id = Guid.NewGuid().ToString("N");
+        }
+
+        VariantId = VariantId?.Trim() ?? string.Empty;
+        VariantName = VariantName?.Trim() ?? string.Empty;
+        Sku = Sku?.Trim() ?? string.Empty;
+        Color = Color?.Trim() ?? string.Empty;
+        Material = Material?.Trim() ?? string.Empty;
+        Size = Size?.Trim() ?? string.Empty;
+        Package = Package?.Trim() ?? string.Empty;
+        SourceImageId = SourceImageId?.Trim() ?? string.Empty;
+        Prompt = Prompt?.Trim() ?? string.Empty;
+        Status = string.IsNullOrWhiteSpace(Status) ? "已生成" : Status.Trim();
+        var imageIds = nodeImageIds?.ToHashSet(StringComparer.Ordinal);
+        ResultImageIds = ResultImageIds?
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Where(id => imageIds is null || imageIds.Contains(id))
+            .Distinct(StringComparer.Ordinal)
+            .Take(12)
+            .ToList() ?? [];
+        SelectedImageId = string.IsNullOrWhiteSpace(SelectedImageId) ||
+            !ResultImageIds.Contains(SelectedImageId, StringComparer.Ordinal)
+                ? ResultImageIds.LastOrDefault()
+                : SelectedImageId.Trim();
+    }
+}
+
+public sealed record CommerceExportRequest(
+    string Platform,
+    string Scope,
+    string ImageSelection,
+    string ResolutionTier,
+    string FileNamePattern);
+
+public sealed class CommerceExportManifest
+{
+    public string ProductId { get; set; } = string.Empty;
+    public string ProductName { get; set; } = string.Empty;
+    public string PlanId { get; set; } = string.Empty;
+    public string PlanTitle { get; set; } = string.Empty;
+    public string Platform { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string ImageSelection { get; set; } = string.Empty;
+    public string ResolutionTier { get; set; } = string.Empty;
+    public string FileNamePattern { get; set; } = string.Empty;
+    public DateTimeOffset ExportedAt { get; set; } = DateTimeOffset.Now;
+    public int ImageCount { get; set; }
+    public List<CommerceExportManifestItem> Items { get; set; } = [];
+}
+
+public sealed class CommerceExportManifestItem
+{
+    public string FilePath { get; set; } = string.Empty;
+    public string ImageId { get; set; } = string.Empty;
+    public string ImageUrl { get; set; } = string.Empty;
+    public string ProductId { get; set; } = string.Empty;
+    public string ProductName { get; set; } = string.Empty;
+    public string NodeId { get; set; } = string.Empty;
+    public string NodeType { get; set; } = string.Empty;
+    public string NodeTitle { get; set; } = string.Empty;
+    public string VariantId { get; set; } = string.Empty;
+    public string VariantName { get; set; } = string.Empty;
+    public string Sku { get; set; } = string.Empty;
+    public string Color { get; set; } = string.Empty;
+    public string Material { get; set; } = string.Empty;
+    public string Size { get; set; } = string.Empty;
+    public string Package { get; set; } = string.Empty;
+    public string Platform { get; set; } = string.Empty;
+    public string PresetSize { get; set; } = string.Empty;
+    public string AspectRatio { get; set; } = string.Empty;
+    public string SourcePrompt { get; set; } = string.Empty;
+    public string RequestSummary { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+    public bool BinaryIncluded { get; set; }
 }
 
 public sealed record WorkspaceSidebarItem(

@@ -1069,6 +1069,8 @@ public partial class Home
                 ClearSenderAttachments();
             }
             _commerceGeneratingNodeId = null;
+            _commercePendingIteration = null;
+            _commercePendingVariant = null;
             TouchActiveSession();
             await SaveAsync();
             StateHasChanged();
