@@ -84,8 +84,12 @@
                                                 ActiveProduct="@ActiveCommerceProduct"
                                                 ActivePlan="@ActiveCommercePlan"
                                                 Nodes="@CommercePlanNodes"
+                                                SelectedNode="@ActiveCommerceNode"
+                                                NodeImages="@CommerceNodeImages"
+                                                PlanImages="@CommercePlanImages"
                                                 CanGeneratePlan="@CommerceCanGeneratePlan"
                                                 CanAnalyzeProduct="@CommerceCanAnalyzeProduct"
+                                                CanGenerateAllNodes="@(ActiveCommercePlan?.Nodes.Any(node => node.Enabled) == true && !_loading)"
                                                 AnalysisMessage="@CommerceAnalysisMessage"
                                                 AnalysisMessageIsError="@CommerceAnalysisIsError"
                                                 OnNewProduct="@OpenNewCommerceProduct"
@@ -93,7 +97,22 @@
                                                 OnEditProduct="@OpenEditCommerceProduct"
                                                 OnDeleteProduct="@DeleteCommerceProduct"
                                                 OnAnalyzeProduct="@AnalyzeCommerceProduct"
-                                                OnGeneratePlan="@GenerateCommercePlan" />
+                                                OnGeneratePlan="@GenerateCommercePlan"
+                                                OnSelectNode="@SelectCommercePlanNode"
+                                                OnToggleNode="@ToggleCommercePlanNode"
+                                                OnUpdateNode="@UpdateCommercePlanNode"
+                                                OnApplyNode="@ApplyCommerceNodeToSession"
+                                                OnGenerateNode="@GenerateCommerceNode"
+                                                OnGenerateAllNodes="@GenerateCommerceEnabledNodes"
+                                                OnExportPlan="@ExportCommercePlan"
+                                                OnSelectImage="@SelectCommerceNodeImage"
+                                                OnToggleImageFavorite="@ToggleCommerceNodeImageFavorite"
+                                                OnPreviewImage="@PreviewCommerceNodeImage"
+                                                OnUseImageAsReference="@UseCommerceNodeImageAsReference"
+                                                OnEditImage="@StartImageEdit"
+                                                OnVariationImage="@GenerateVariationFromImage"
+                                                OnCopyImageParameters="@CopyImageParameters"
+                                                OnDownloadImage="@DownloadImage" />
                     }
                     else if (IsGraphicWorkspace && _galleryOpen)
                     {

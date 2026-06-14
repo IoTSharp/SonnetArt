@@ -68,16 +68,28 @@
                 </button>
                 <button type="button" class="studio-button studio-button-light" disabled="@(!CanGeneratePlan)" @onclick="OnGeneratePlan">
                     <Icon Type="branches" Theme="IconThemeType.Outline" />
-                    <span>生成规划</span>
+                    <span>AI 规划</span>
                 </button>
             </div>
         </header>
 
         <div class="commerce-plan-empty">
             <div class="commerce-product-core">
-                <Icon Type="shopping" Theme="IconThemeType.Outline" />
-                <strong>@(ActiveProduct?.Name ?? "商品中心")</strong>
-                <span>@ProductCoreText</span>
+                <div>
+                    <Icon Type="shopping" Theme="IconThemeType.Outline" />
+                </div>
+                <section>
+                    <strong>@(ActiveProduct?.Name ?? "商品中心")</strong>
+                    <span>@ProductCoreText</span>
+                    @if (!string.IsNullOrWhiteSpace(ActivePlan?.StrategySummary))
+                    {
+                        <p>@ActivePlan.StrategySummary</p>
+                    }
+                </section>
+                @if (ActivePlan is not null)
+                {
+                    <small>@ActivePlan.Nodes.Count 个节点 · @(string.IsNullOrWhiteSpace(ActivePlan.Model) ? "本地规划" : ActivePlan.Model)</small>
+                }
             </div>
 
             @if (ActiveProduct?.Analysis.HasContent == true)
@@ -122,18 +134,113 @@
                 <p class="@AnalysisMessageClass">@AnalysisMessage</p>
             }
 
-            <div class="commerce-node-grid">
-                @foreach (var node in Nodes)
+            <div class="commerce-planning-board">
+                <div class="commerce-node-list" aria-label="规划节点">
+                    @foreach (var node in Nodes)
+                    {
+                        <article class="@NodeItemClass(node)">
+                            <button type="button" class="commerce-node-main" @onclick="() => OnSelectNode.InvokeAsync(node.Id)">
+                                <span>@node.Status</span>
+                                <strong>@node.Title</strong>
+                                <small>@(string.IsNullOrWhiteSpace(node.Goal) ? node.Prompt : node.Goal)</small>
+                                <em>@NodeMeta(node)</em>
+                            </button>
+                            <div class="commerce-node-actions">
+                                <button type="button" title="套用到作图区" disabled="@(ActivePlan is null)" @onclick="() => OnApplyNode.InvokeAsync(node)">
+                                    <Icon Type="select" Theme="IconThemeType.Outline" />
+                                </button>
+                                <button type="button" title="生成此节点" disabled="@(ActivePlan is null || !node.Enabled)" @onclick="() => OnGenerateNode.InvokeAsync(node)">
+                                    <Icon Type="thunderbolt" Theme="IconThemeType.Outline" />
+                                </button>
+                                <button type="button" title="启用或暂停" disabled="@(ActivePlan is null)" @onclick="() => OnToggleNode.InvokeAsync(node)">
+                                    <Icon Type="pause-circle" Theme="IconThemeType.Outline" />
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+
+                @if (EditableNode is null)
                 {
-                    <article class="@(node.Enabled ? null : "disabled")">
-                        <span>@node.Status</span>
-                        <strong>@node.Title</strong>
-                        <small>@(string.IsNullOrWhiteSpace(node.Goal) ? node.Prompt : node.Goal)</small>
-                        @if (!string.IsNullOrWhiteSpace(node.AspectRatio) && node.AspectRatio != "auto")
-                        {
-                            <em>@node.AspectRatio · @node.PlannedCount 张</em>
-                        }
-                    </article>
+                    <aside class="commerce-node-editor commerce-node-editor-empty" aria-label="节点编辑">
+                        <Icon Type="form" Theme="IconThemeType.Outline" />
+                        <strong>选择节点后编辑</strong>
+                        <span>商品规划生成后，可以在这里调整画面目标、构图、数量和提示词。</span>
+                    </aside>
+                }
+                else
+                {
+                    <aside class="commerce-node-editor" aria-label="节点编辑">
+                        <header>
+                            <div>
+                                <span class="workspace-eyebrow">节点编辑</span>
+                                <h4>@_nodeTitle</h4>
+                            </div>
+                            <label class="commerce-node-toggle">
+                                <input type="checkbox" checked="@_nodeEnabled" @onchange="UpdateNodeEnabled" />
+                                <span>@(_nodeEnabled ? "启用" : "暂停")</span>
+                            </label>
+                        </header>
+
+                        <div class="commerce-node-form">
+                            <label class="studio-field">
+                                <span class="studio-label">标题</span>
+                                <input class="studio-input" value="@_nodeTitle" @oninput="UpdateNodeTitle" />
+                            </label>
+                            <label class="studio-field">
+                                <span class="studio-label">类型</span>
+                                <input class="studio-input" value="@_nodeType" @oninput="UpdateNodeType" />
+                            </label>
+                            <label class="studio-field">
+                                <span class="studio-label">比例</span>
+                                <select class="studio-select" value="@_nodeAspectRatio" @onchange="UpdateNodeAspectRatio">
+                                    @foreach (var ratio in AspectRatioOptions)
+                                    {
+                                        <option value="@ratio">@ratio</option>
+                                    }
+                                </select>
+                            </label>
+                            <label class="studio-field">
+                                <span class="studio-label">数量</span>
+                                <input class="studio-input" type="number" min="1" max="12" value="@_nodePlannedCount" @oninput="UpdateNodePlannedCount" />
+                            </label>
+                            <label class="studio-field commerce-field-wide">
+                                <span class="studio-label">目标</span>
+                                <textarea class="studio-textarea" value="@_nodeGoal" @oninput="UpdateNodeGoal"></textarea>
+                            </label>
+                            <label class="studio-field">
+                                <span class="studio-label">场景</span>
+                                <textarea class="studio-textarea" value="@_nodeScene" @oninput="UpdateNodeScene"></textarea>
+                            </label>
+                            <label class="studio-field">
+                                <span class="studio-label">构图</span>
+                                <textarea class="studio-textarea" value="@_nodeComposition" @oninput="UpdateNodeComposition"></textarea>
+                            </label>
+                            <label class="studio-field commerce-field-wide">
+                                <span class="studio-label">核心信息</span>
+                                <input class="studio-input" value="@_nodeKeyMessage" @oninput="UpdateNodeKeyMessage" />
+                            </label>
+                            <label class="studio-field commerce-field-wide">
+                                <span class="studio-label">提示词</span>
+                                <textarea class="studio-textarea commerce-node-prompt" value="@_nodePrompt" @oninput="UpdateNodePrompt"></textarea>
+                            </label>
+                            <label class="studio-field commerce-field-wide">
+                                <span class="studio-label">负向提示词</span>
+                                <textarea class="studio-textarea" value="@_nodeNegativePrompt" @oninput="UpdateNodeNegativePrompt"></textarea>
+                            </label>
+                        </div>
+
+                        <footer>
+                            <button type="button" class="studio-button studio-button-light" @onclick="ResetNodeDraft">
+                                <Icon Type="reload" Theme="IconThemeType.Outline" />
+                                <span>还原</span>
+                            </button>
+                            <button type="button" class="studio-button studio-button-primary" @onclick="SaveNodeDraft">
+                                <Icon Type="save" Theme="IconThemeType.Outline" />
+                                <span>保存节点</span>
+                            </button>
+                        </footer>
+                    </aside>
                 }
             </div>
         </div>
@@ -143,24 +250,94 @@
         <header>
             <div>
                 <span class="workspace-eyebrow">结果与导出</span>
-                <h3>版本</h3>
+                <h3>@(SelectedNode?.Title ?? "版本")</h3>
             </div>
-            <button type="button" class="commerce-icon-button" title="导出" disabled>
-                <Icon Type="download" Theme="IconThemeType.Outline" />
-            </button>
+            <div class="commerce-header-actions">
+                <button type="button" class="commerce-icon-button" title="生成全部启用节点" disabled="@(!CanGenerateAllNodes)" @onclick="OnGenerateAllNodes">
+                    <Icon Type="thunderbolt" Theme="IconThemeType.Outline" />
+                </button>
+                <button type="button" class="commerce-icon-button" title="导出规划书" disabled="@(ActivePlan is null)" @onclick="OnExportPlan">
+                    <Icon Type="download" Theme="IconThemeType.Outline" />
+                </button>
+            </div>
         </header>
 
-        <div class="commerce-empty-block">
-            <Icon Type="picture" Theme="IconThemeType.Outline" />
-            <strong>等待首轮生成</strong>
-            <span>节点生成结果、创意分支、变体套用和导出预设会集中在这里评审。</span>
+        <div class="commerce-results-body">
+            <div class="commerce-result-summary">
+                <div>
+                    <span>当前节点</span>
+                    <strong>@NodeImages.Count</strong>
+                </div>
+                <div>
+                    <span>整套方案</span>
+                    <strong>@PlanImages.Count</strong>
+                </div>
+                <div>
+                    <span>已选片</span>
+                    <strong>@PlanImages.Count(image => image.IsFavorite)</strong>
+                </div>
+            </div>
+
+            @if (SelectedNode is not null && SelectedNode.LastGeneratedAt is not null)
+            {
+                <p class="commerce-result-note">最近生成 @SelectedNode.LastGeneratedAt.Value.ToLocalTime().ToString("MM-dd HH:mm")</p>
+            }
+
+            @if (NodeImages.Count == 0)
+            {
+                <div class="commerce-empty-block">
+                    <Icon Type="picture" Theme="IconThemeType.Outline" />
+                    <strong>等待节点生成</strong>
+                    <span>点击节点旁的生成按钮，结果会自动归档到当前节点。</span>
+                </div>
+            }
+            else
+            {
+                <div class="commerce-result-grid">
+                    @foreach (var image in NodeImages)
+                    {
+                        <article class="@ResultItemClass(image)">
+                            <button type="button" class="commerce-result-image" title="打开预览" @onclick="() => OnPreviewImage.InvokeAsync(image)">
+                                <img src="@image.Url" alt="@SelectedNode?.Title" />
+                            </button>
+                            <div class="commerce-result-meta">
+                                <strong>@ImageTitle(image)</strong>
+                                <span>@ImageMeta(image)</span>
+                            </div>
+                            <div class="commerce-result-actions">
+                                <button type="button" title="设为选片" @onclick="() => OnSelectImage.InvokeAsync(image)">
+                                    <Icon Type="check-circle" Theme="@(IsSelectedImage(image) ? IconThemeType.Fill : IconThemeType.Outline)" />
+                                </button>
+                                <button type="button" title="收藏" @onclick="() => OnToggleImageFavorite.InvokeAsync(image)">
+                                    <Icon Type="star" Theme="@(image.IsFavorite ? IconThemeType.Fill : IconThemeType.Outline)" />
+                                </button>
+                                <button type="button" title="作为参考图" @onclick="() => OnUseImageAsReference.InvokeAsync(image)">
+                                    <Icon Type="link" Theme="IconThemeType.Outline" />
+                                </button>
+                                <button type="button" title="编辑图片" @onclick="() => OnEditImage.InvokeAsync(image)">
+                                    <Icon Type="edit" Theme="IconThemeType.Outline" />
+                                </button>
+                                <button type="button" title="生成变化" @onclick="() => OnVariationImage.InvokeAsync(image)">
+                                    <Icon Type="branches" Theme="IconThemeType.Outline" />
+                                </button>
+                                <button type="button" title="复制参数" @onclick="() => OnCopyImageParameters.InvokeAsync(image)">
+                                    <Icon Type="code" Theme="IconThemeType.Outline" />
+                                </button>
+                                <button type="button" title="下载" @onclick="() => OnDownloadImage.InvokeAsync(image)">
+                                    <Icon Type="download" Theme="IconThemeType.Outline" />
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
         </div>
 
         <div class="commerce-export-list">
-            <span>Amazon</span>
-            <span>Shopee</span>
-            <span>Shopify</span>
-            <span>独立站</span>
+            <span>Amazon · @PlanImages.Count</span>
+            <span>Shopee · @PlanImages.Count</span>
+            <span>Shopify · @PlanImages.Count</span>
+            <span>独立站 · @PlanImages.Count</span>
         </div>
     </aside>
 </div>
@@ -170,8 +347,12 @@
     [Parameter] public CommerceProduct? ActiveProduct { get; set; }
     [Parameter] public CommerceImagePlan? ActivePlan { get; set; }
     [Parameter] public IReadOnlyList<CommerceImageNode> Nodes { get; set; } = [];
+    [Parameter] public CommerceImageNode? SelectedNode { get; set; }
+    [Parameter] public IReadOnlyList<GeneratedImage> NodeImages { get; set; } = [];
+    [Parameter] public IReadOnlyList<GeneratedImage> PlanImages { get; set; } = [];
     [Parameter] public bool CanGeneratePlan { get; set; }
     [Parameter] public bool CanAnalyzeProduct { get; set; }
+    [Parameter] public bool CanGenerateAllNodes { get; set; }
     [Parameter] public string? AnalysisMessage { get; set; }
     [Parameter] public bool AnalysisMessageIsError { get; set; }
     [Parameter] public EventCallback OnNewProduct { get; set; }
@@ -180,6 +361,38 @@
     [Parameter] public EventCallback<CommerceProduct> OnDeleteProduct { get; set; }
     [Parameter] public EventCallback OnAnalyzeProduct { get; set; }
     [Parameter] public EventCallback OnGeneratePlan { get; set; }
+    [Parameter] public EventCallback<string> OnSelectNode { get; set; }
+    [Parameter] public EventCallback<CommerceImageNode> OnToggleNode { get; set; }
+    [Parameter] public EventCallback<CommerceImageNode> OnUpdateNode { get; set; }
+    [Parameter] public EventCallback<CommerceImageNode> OnApplyNode { get; set; }
+    [Parameter] public EventCallback<CommerceImageNode> OnGenerateNode { get; set; }
+    [Parameter] public EventCallback OnGenerateAllNodes { get; set; }
+    [Parameter] public EventCallback OnExportPlan { get; set; }
+    [Parameter] public EventCallback<GeneratedImage> OnSelectImage { get; set; }
+    [Parameter] public EventCallback<GeneratedImage> OnToggleImageFavorite { get; set; }
+    [Parameter] public EventCallback<GeneratedImage> OnPreviewImage { get; set; }
+    [Parameter] public EventCallback<GeneratedImage> OnUseImageAsReference { get; set; }
+    [Parameter] public EventCallback<GeneratedImage> OnEditImage { get; set; }
+    [Parameter] public EventCallback<GeneratedImage> OnVariationImage { get; set; }
+    [Parameter] public EventCallback<GeneratedImage> OnCopyImageParameters { get; set; }
+    [Parameter] public EventCallback<GeneratedImage> OnDownloadImage { get; set; }
+
+    private static readonly string[] AspectRatioOptions = ["auto", "1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9", "21:9"];
+
+    private string? _draftNodeId;
+    private string _nodeType = "main";
+    private string _nodeTitle = "主图";
+    private string _nodeGoal = string.Empty;
+    private string _nodeAspectRatio = "1:1";
+    private string _nodeScene = string.Empty;
+    private string _nodeComposition = string.Empty;
+    private string _nodeKeyMessage = string.Empty;
+    private string _nodePrompt = string.Empty;
+    private string _nodeNegativePrompt = string.Empty;
+    private bool _nodeEnabled = true;
+    private int _nodePlannedCount = 4;
+
+    private CommerceImageNode? EditableNode => SelectedNode ?? ActivePlan?.Nodes.FirstOrDefault();
 
     private string ProductCoreText => ActiveProduct is null
         ? "导入商品后，主图、场景图、细节图、对比图、尺寸图和 A+ 图会围绕商品事实展开。"
@@ -200,6 +413,14 @@
         ? "commerce-analysis-message error"
         : "commerce-analysis-message";
 
+    protected override void OnParametersSet()
+    {
+        if (!string.Equals(_draftNodeId, EditableNode?.Id, StringComparison.Ordinal))
+        {
+            ResetNodeDraft();
+        }
+    }
+
     private async Task AnalyzeProductFromList(CommerceProduct product)
     {
         if (!string.Equals(product.Id, ActiveProduct?.Id, StringComparison.Ordinal))
@@ -214,6 +435,113 @@
         string.Equals(product.Id, ActiveProduct?.Id, StringComparison.Ordinal)
             ? "commerce-product-item active"
             : "commerce-product-item";
+
+    private string NodeItemClass(CommerceImageNode node)
+    {
+        var classes = "commerce-node-item";
+        if (!node.Enabled)
+        {
+            classes += " disabled";
+        }
+
+        if (string.Equals(node.Id, EditableNode?.Id, StringComparison.Ordinal))
+        {
+            classes += " active";
+        }
+
+        return classes;
+    }
+
+    private static string NodeMeta(CommerceImageNode node) =>
+        $"{(string.IsNullOrWhiteSpace(node.AspectRatio) ? "auto" : node.AspectRatio)} · {node.PlannedCount} 张 · {ReferenceRoleLabel(node.ReferenceRole)} · 结果 {node.GeneratedImageIds.Count}";
+
+    private string ResultItemClass(GeneratedImage image) =>
+        IsSelectedImage(image)
+            ? "commerce-result-item selected"
+            : "commerce-result-item";
+
+    private bool IsSelectedImage(GeneratedImage image) =>
+        string.Equals(SelectedNode?.SelectedImageId, image.Id, StringComparison.Ordinal);
+
+    private static string ImageTitle(GeneratedImage image) =>
+        string.IsNullOrWhiteSpace(image.RequestSummary)
+            ? image.Model
+            : image.RequestSummary;
+
+    private static string ImageMeta(GeneratedImage image) =>
+        $"{image.CreatedAt.ToLocalTime():MM-dd HH:mm} · {image.AspectRatio} · {image.Size}";
+
+    private static string ReferenceRoleLabel(string role) =>
+        role switch
+        {
+            "product" => "产品参考",
+            "style" => "风格参考",
+            "content" => "内容参考",
+            "character" => "角色参考",
+            _ => "自动参考",
+        };
+
+    private void ResetNodeDraft()
+    {
+        var node = EditableNode;
+        _draftNodeId = node?.Id;
+        _nodeType = node?.Type ?? "main";
+        _nodeTitle = node?.Title ?? "主图";
+        _nodeGoal = node?.Goal ?? string.Empty;
+        _nodeAspectRatio = node?.AspectRatio ?? "1:1";
+        _nodeScene = node?.Scene ?? string.Empty;
+        _nodeComposition = node?.Composition ?? string.Empty;
+        _nodeKeyMessage = node?.KeyMessage ?? string.Empty;
+        _nodePrompt = node?.Prompt ?? string.Empty;
+        _nodeNegativePrompt = node?.NegativePrompt ?? string.Empty;
+        _nodeEnabled = node?.Enabled ?? true;
+        _nodePlannedCount = node?.PlannedCount ?? 4;
+    }
+
+    private async Task SaveNodeDraft()
+    {
+        var node = EditableNode;
+        if (node is null)
+        {
+            return;
+        }
+
+        await OnUpdateNode.InvokeAsync(new CommerceImageNode
+        {
+            Id = node.Id,
+            Type = _nodeType,
+            Title = _nodeTitle,
+            Goal = _nodeGoal,
+            AspectRatio = _nodeAspectRatio,
+            Scene = _nodeScene,
+            Composition = _nodeComposition,
+            KeyMessage = _nodeKeyMessage,
+            Prompt = _nodePrompt,
+            NegativePrompt = _nodeNegativePrompt,
+            ReferenceRole = node.ReferenceRole,
+            Enabled = _nodeEnabled,
+            Status = _nodeEnabled ? "已编辑" : "已暂停",
+            PlannedCount = _nodePlannedCount,
+        });
+    }
+
+    private void UpdateNodeType(ChangeEventArgs args) => _nodeType = args.Value?.ToString() ?? string.Empty;
+    private void UpdateNodeTitle(ChangeEventArgs args) => _nodeTitle = args.Value?.ToString() ?? string.Empty;
+    private void UpdateNodeGoal(ChangeEventArgs args) => _nodeGoal = args.Value?.ToString() ?? string.Empty;
+    private void UpdateNodeAspectRatio(ChangeEventArgs args) => _nodeAspectRatio = args.Value?.ToString() ?? "auto";
+    private void UpdateNodeScene(ChangeEventArgs args) => _nodeScene = args.Value?.ToString() ?? string.Empty;
+    private void UpdateNodeComposition(ChangeEventArgs args) => _nodeComposition = args.Value?.ToString() ?? string.Empty;
+    private void UpdateNodeKeyMessage(ChangeEventArgs args) => _nodeKeyMessage = args.Value?.ToString() ?? string.Empty;
+    private void UpdateNodePrompt(ChangeEventArgs args) => _nodePrompt = args.Value?.ToString() ?? string.Empty;
+    private void UpdateNodeNegativePrompt(ChangeEventArgs args) => _nodeNegativePrompt = args.Value?.ToString() ?? string.Empty;
+    private void UpdateNodeEnabled(ChangeEventArgs args) => _nodeEnabled = args.Value is bool value && value;
+    private void UpdateNodePlannedCount(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var value))
+        {
+            _nodePlannedCount = Math.Clamp(value, 1, 12);
+        }
+    }
 
     private static string ProductPreview(CommerceProduct product)
     {

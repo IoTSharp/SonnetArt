@@ -8,4 +8,12 @@
     <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(Version)</InformationalVersion>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SonnetArt\SonnetArt.csproj" />
+  </ItemGroup>
+
 </Project>

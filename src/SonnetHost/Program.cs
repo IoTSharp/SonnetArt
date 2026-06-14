@@ -7,6 +7,7 @@ using SonnetHost.Proxy;
 var builder = WebApplication.CreateSlimBuilder(args);
 
 builder.WebHost.UseUrls(ResolveListenUrl());
+builder.WebHost.UseStaticWebAssets();
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;
@@ -66,6 +67,8 @@ app.UseSonnetArtSecurityHeaders();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapSonnetProxyEndpoints();
 app.UseResponseCompression();
+app.UseSonnetArtFrameworkAliases();
+app.UseBlazorFrameworkFiles();
 app.UseSonnetArtStaticFiles();
 app.MapFallbackToFile("index.html");
 
@@ -131,6 +134,62 @@ internal static class SonnetArtStaticFileApplicationBuilderExtensions
                 }
             },
         });
+    }
+
+    public static IApplicationBuilder UseSonnetArtFrameworkAliases(this IApplicationBuilder app)
+    {
+        return app.Use(async (context, next) =>
+        {
+            var path = context.Request.Path.Value;
+            if (HttpMethods.IsGet(context.Request.Method) &&
+                path is not null &&
+                TryResolveFrameworkAlias(context.RequestServices, path, out var physicalFile))
+            {
+                context.Response.ContentType = "text/javascript";
+                await context.Response.SendFileAsync(physicalFile, context.RequestAborted);
+                return;
+            }
+
+            await next(context);
+        });
+    }
+
+    private static bool TryResolveFrameworkAlias(IServiceProvider services, string requestPath, out string physicalFile)
+    {
+        physicalFile = string.Empty;
+        var fileName = requestPath switch
+        {
+            "/_framework/blazor.webassembly.js" => "blazor.webassembly.*.js",
+            "/_framework/dotnet.js" => "dotnet.*.js",
+            "/_framework/dotnet.native.js" => "dotnet.native.*.js",
+            "/_framework/dotnet.runtime.js" => "dotnet.runtime.*.js",
+            _ => string.Empty,
+        };
+
+        if (fileName.Length == 0)
+        {
+            return false;
+        }
+
+        var environment = services.GetRequiredService<IWebHostEnvironment>();
+        var clientFrameworkDirectory = Path.GetFullPath(Path.Combine(
+            environment.ContentRootPath,
+            "..",
+            "SonnetArt",
+            "bin",
+            environment.EnvironmentName.Equals("Development", StringComparison.OrdinalIgnoreCase) ? "Debug" : "Release",
+            "net10.0",
+            "wwwroot",
+            "_framework"));
+        if (!Directory.Exists(clientFrameworkDirectory))
+        {
+            return false;
+        }
+
+        physicalFile = Directory.EnumerateFiles(clientFrameworkDirectory, fileName, SearchOption.TopDirectoryOnly)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault() ?? string.Empty;
+        return physicalFile.Length > 0;
     }
 
     private static bool IsNoCacheAsset(PathString path)

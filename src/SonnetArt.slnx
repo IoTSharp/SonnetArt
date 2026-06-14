@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="../external/AntDesignXBlazor/src/AntDesign.X.Blazor/AntDesign.X.Blazor.csproj" />
+  <Project Path="SonnetArt/SonnetArt.csproj" />
+  <Project Path="SonnetHost/SonnetHost.csproj" />
+</Solution>

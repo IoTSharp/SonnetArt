@@ -34,6 +34,20 @@ SonnetArt 是前端优先的静态 Web 应用。使用 Docker 部署时，容器
 
 ## 🚀 快速开始
 
+### 本地一键启动
+
+在仓库根目录运行：
+
+```powershell
+.\start-web.ps1
+```
+
+Windows 也可以直接运行 `start-web.cmd`。脚本会恢复所需的 .NET workload，启动 `http://localhost:5131` 上的 SonnetHost，并打开浏览器。
+
+如果没有配置任何上游地址，SonnetArt 会默认把账号接口和 OpenAI 兼容图像接口代理到 `https://sonnet.vip`。
+
+### Docker 启动
+
 创建一个 `docker-compose.yml`，把 SonnetArt 和 sub2api 兼容网关一起部署：
 
 ```yaml
@@ -68,8 +82,8 @@ services:
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `SONNET_ART_PUBLIC_ORIGIN` | 否 | `:8080` | SonnetHost 监听地址。容器内通常保持 `:8080`。 |
-| `SONNET_ART_AI_UPSTREAM_URL` | 是 | - | OpenAI 兼容图像模型网关地址。 |
-| `SONNET_ART_ACCOUNT_UPSTREAM_URL` | 是 | - | 账号 / sub2api 兼容 API 地址。 |
+| `SONNET_ART_AI_UPSTREAM_URL` | 否 | `https://sonnet.vip` | OpenAI 兼容图像模型网关地址。 |
+| `SONNET_ART_ACCOUNT_UPSTREAM_URL` | 否 | `https://sonnet.vip` | 账号 / sub2api 兼容 API 地址。 |
 
 ## 🔗 嵌入模式
 

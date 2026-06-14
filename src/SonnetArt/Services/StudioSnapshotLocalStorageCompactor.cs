@@ -186,6 +186,8 @@ internal static class StudioSnapshotLocalStorageCompactor
             Id = plan.Id,
             ProductId = plan.ProductId,
             Title = LimitText(plan.Title, MaxTitleChars),
+            StrategySummary = LimitText(plan.StrategySummary, 1024),
+            Model = LimitText(plan.Model, 128),
             Nodes = plan.Nodes
                 .Take(40)
                 .Select(CopyCommerceImageNode)
@@ -204,12 +206,18 @@ internal static class StudioSnapshotLocalStorageCompactor
             Title = LimitText(node.Title, 128),
             Goal = LimitText(node.Goal, 512),
             AspectRatio = node.AspectRatio,
+            Scene = LimitText(node.Scene, 512),
+            Composition = LimitText(node.Composition, 512),
+            KeyMessage = LimitText(node.KeyMessage, 512),
             Prompt = LimitText(node.Prompt, MaxPromptChars),
             NegativePrompt = LimitText(node.NegativePrompt, MaxPromptChars),
             ReferenceRole = node.ReferenceRole,
             Enabled = node.Enabled,
             Status = LimitText(node.Status, 64),
             PlannedCount = node.PlannedCount,
+            GeneratedImageIds = node.GeneratedImageIds.Take(96).Select(id => LimitText(id, 64)).ToList(),
+            SelectedImageId = LimitText(node.SelectedImageId, 64),
+            LastGeneratedAt = node.LastGeneratedAt,
         };
     }
 

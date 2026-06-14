@@ -531,6 +531,8 @@ public sealed class CommerceImagePlan
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string ProductId { get; set; } = string.Empty;
     public string Title { get; set; } = "首轮商品图方案";
+    public string StrategySummary { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
     public List<CommerceImageNode> Nodes { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
@@ -544,6 +546,8 @@ public sealed class CommerceImagePlan
 
         ProductId = ProductId?.Trim() ?? string.Empty;
         Title = string.IsNullOrWhiteSpace(Title) ? "首轮商品图方案" : Title.Trim();
+        StrategySummary = StrategySummary?.Trim() ?? string.Empty;
+        Model = Model?.Trim() ?? string.Empty;
         Nodes ??= [];
 
         foreach (var node in Nodes)
@@ -560,12 +564,18 @@ public sealed class CommerceImageNode
     public string Title { get; set; } = "主图";
     public string Goal { get; set; } = string.Empty;
     public string AspectRatio { get; set; } = "1:1";
+    public string Scene { get; set; } = string.Empty;
+    public string Composition { get; set; } = string.Empty;
+    public string KeyMessage { get; set; } = string.Empty;
     public string Prompt { get; set; } = string.Empty;
     public string NegativePrompt { get; set; } = string.Empty;
     public string ReferenceRole { get; set; } = "product";
     public bool Enabled { get; set; } = true;
     public string Status { get; set; } = "待规划";
     public int PlannedCount { get; set; } = 4;
+    public List<string> GeneratedImageIds { get; set; } = [];
+    public string? SelectedImageId { get; set; }
+    public DateTimeOffset? LastGeneratedAt { get; set; }
 
     public void Normalize()
     {
@@ -578,6 +588,9 @@ public sealed class CommerceImageNode
         Title = string.IsNullOrWhiteSpace(Title) ? "主图" : Title.Trim();
         Goal = Goal?.Trim() ?? string.Empty;
         AspectRatio = StudioSettings.NormalizeAspectRatio(AspectRatio);
+        Scene = Scene?.Trim() ?? string.Empty;
+        Composition = Composition?.Trim() ?? string.Empty;
+        KeyMessage = KeyMessage?.Trim() ?? string.Empty;
         Prompt = Prompt?.Trim() ?? string.Empty;
         NegativePrompt = NegativePrompt?.Trim() ?? string.Empty;
         ReferenceRole = StudioSnapshot.NormalizeReferenceRole(ReferenceRole) == "auto"
@@ -585,6 +598,16 @@ public sealed class CommerceImageNode
             : StudioSnapshot.NormalizeReferenceRole(ReferenceRole);
         Status = string.IsNullOrWhiteSpace(Status) ? "待规划" : Status.Trim();
         PlannedCount = Math.Clamp(PlannedCount, 1, 12);
+        GeneratedImageIds = GeneratedImageIds?
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .Take(96)
+            .ToList() ?? [];
+        SelectedImageId = string.IsNullOrWhiteSpace(SelectedImageId) ||
+            !GeneratedImageIds.Contains(SelectedImageId, StringComparer.Ordinal)
+                ? GeneratedImageIds.LastOrDefault()
+                : SelectedImageId.Trim();
     }
 }
 

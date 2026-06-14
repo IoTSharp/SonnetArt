@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
+using Microsoft.JSInterop;
+using System.Text;
 using SonnetArt.Models;
 
 namespace SonnetArt.Pages;
@@ -7,6 +9,8 @@ namespace SonnetArt.Pages;
 public partial class Home
 {
     private bool _commerceProductDialogOpen;
+    private string? _commerceSelectedNodeId;
+    private string? _commerceGeneratingNodeId;
     private string? _commerceEditingProductId;
     private string _commerceProductName = string.Empty;
     private string _commerceProductDescription = string.Empty;
@@ -40,7 +44,23 @@ public partial class Home
                 Status = node.Status,
             }).ToArray();
 
-    private bool CommerceCanGeneratePlan => ActiveCommerceProduct is not null;
+    private CommerceImageNode? ActiveCommerceNode =>
+        ActiveCommercePlan?.Nodes.FirstOrDefault(node => node.Id == _commerceSelectedNodeId)
+        ?? ActiveCommercePlan?.Nodes.FirstOrDefault();
+
+    private IReadOnlyList<GeneratedImage> CommerceNodeImages =>
+        GetCommerceNodeImages(ActiveCommerceNode);
+
+    private IReadOnlyList<GeneratedImage> CommercePlanImages =>
+        ActiveCommercePlan is null
+            ? []
+            : ActiveCommercePlan.Nodes
+                .SelectMany(GetCommerceNodeImages)
+                .DistinctBy(image => image.Id)
+                .OrderByDescending(image => image.CreatedAt)
+                .ToArray();
+
+    private bool CommerceCanGeneratePlan => ActiveCommerceProduct is not null && !_loading;
     private bool CommerceCanAnalyzeProduct => ActiveCommerceProduct is not null && !_loading;
     private string CommerceProductDialogTitle => _commerceEditingProductId is null ? "新增商品" : "编辑商品";
     private string CommerceProductDialogAction => _commerceEditingProductId is null ? "保存商品" : "保存修改";
@@ -96,6 +116,9 @@ public partial class Home
         CommerceWorkspace.ActiveImagePlanId = CommerceWorkspace.ImagePlans
             .OrderByDescending(plan => plan.UpdatedAt)
             .FirstOrDefault(plan => plan.ProductId == productId)?.Id;
+        _commerceSelectedNodeId = CommerceWorkspace.ImagePlans
+            .FirstOrDefault(plan => plan.Id == CommerceWorkspace.ActiveImagePlanId)?
+            .Nodes.FirstOrDefault()?.Id;
         TouchCommerceWorkspace();
         await SaveAsync();
     }
@@ -162,28 +185,92 @@ public partial class Home
     private async Task GenerateCommercePlan()
     {
         var product = ActiveCommerceProduct;
-        if (product is null)
+        if (product is null || _loading)
         {
             return;
         }
 
+        if (!ChatReady)
+        {
+            CreateLocalCommercePlan(product, "内置规划已生成。登录后可使用 AI 规划。");
+            await SaveAsync();
+            return;
+        }
+
+        _commerceAnalysisMessage = null;
+        _commerceAnalysisIsError = false;
+        _loading = true;
+        _loadingLabel = "正在规划商品图";
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        StateHasChanged();
+
+        try
+        {
+            var seedNodes = CreateCommercePlanNodes(product);
+            var plan = await ChatClient.PlanCommerceImagesAsync(Settings, product, seedNodes, _cts.Token);
+            ApplyCommercePlan(product, plan, $"{product.Name} AI 商品图方案");
+            _commerceAnalysisMessage = "AI 图片规划已生成。";
+            await SaveAsync();
+        }
+        catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
+        {
+            _commerceAnalysisMessage = "本次图片规划已取消。";
+            _commerceAnalysisIsError = true;
+        }
+        catch (Exception ex)
+        {
+            CreateLocalCommercePlan(product, $"AI 规划失败，已生成内置规划：{ex.Message}", isError: true);
+            await SaveAsync();
+        }
+        finally
+        {
+            _loading = false;
+            _loadingLabel = "正在请求图像接口";
+            StateHasChanged();
+        }
+    }
+
+    private void CreateLocalCommercePlan(CommerceProduct product, string? message = null, bool isError = false)
+    {
         var now = DateTimeOffset.Now;
         var plan = new CommerceImagePlan
         {
             ProductId = product.Id,
             Title = $"{product.Name} 首轮商品图方案",
+            StrategySummary = "围绕商品主体、使用场景、材质细节、规格说明和详情页转化建立首轮图片覆盖。",
+            Model = "built-in",
             CreatedAt = now,
             UpdatedAt = now,
             Nodes = CreateCommercePlanNodes(product),
         };
 
+        ApplyCommercePlan(product, plan, plan.Title);
+        _commerceAnalysisMessage = message;
+        _commerceAnalysisIsError = isError;
+    }
+
+    private void ApplyCommercePlan(CommerceProduct product, CommerceImagePlan plan, string fallbackTitle)
+    {
+        var now = DateTimeOffset.Now;
+        plan.ProductId = product.Id;
+        plan.Title = string.IsNullOrWhiteSpace(plan.Title) ? fallbackTitle : plan.Title;
+        plan.CreatedAt = now;
+        plan.UpdatedAt = now;
+        plan.Normalize();
+
+        if (plan.Nodes.Count == 0)
+        {
+            plan.Nodes = CreateCommercePlanNodes(product);
+        }
+
         CommerceWorkspace.ImagePlans.RemoveAll(item => item.ProductId == product.Id);
         CommerceWorkspace.ImagePlans.Insert(0, plan);
         CommerceWorkspace.ActiveProductId = product.Id;
         CommerceWorkspace.ActiveImagePlanId = plan.Id;
+        _commerceSelectedNodeId = plan.Nodes.FirstOrDefault()?.Id;
         SyncCommerceProductReferencesToActiveSession(product);
         TouchCommerceWorkspace();
-        await SaveAsync();
     }
 
     private async Task AnalyzeCommerceProduct()
@@ -236,6 +323,198 @@ public partial class Home
             _loadingLabel = "正在请求图像接口";
             StateHasChanged();
         }
+    }
+
+    private async Task SelectCommercePlanNode(string nodeId)
+    {
+        if (ActiveCommercePlan?.Nodes.Any(node => node.Id == nodeId) != true)
+        {
+            return;
+        }
+
+        _commerceSelectedNodeId = nodeId;
+        await Task.CompletedTask;
+    }
+
+    private async Task ToggleCommercePlanNode(CommerceImageNode node)
+    {
+        var plan = ActiveCommercePlan;
+        if (plan is null)
+        {
+            return;
+        }
+
+        node.Enabled = !node.Enabled;
+        node.Status = node.Enabled ? "已确认" : "已暂停";
+        plan.UpdatedAt = DateTimeOffset.Now;
+        TouchCommerceWorkspace();
+        await SaveAsync();
+    }
+
+    private async Task UpdateCommercePlanNode(CommerceImageNode updatedNode)
+    {
+        var plan = ActiveCommercePlan;
+        if (plan is null)
+        {
+            return;
+        }
+
+        var index = plan.Nodes.FindIndex(node => node.Id == updatedNode.Id);
+        if (index < 0)
+        {
+            return;
+        }
+
+        updatedNode.Normalize();
+        updatedNode.Status = updatedNode.Enabled ? "已编辑" : "已暂停";
+        plan.Nodes[index] = updatedNode;
+        plan.UpdatedAt = DateTimeOffset.Now;
+        TouchCommerceWorkspace();
+        await SaveAsync();
+    }
+
+    private async Task ApplyCommerceNodeToSession(CommerceImageNode node)
+    {
+        var product = ActiveCommerceProduct;
+        if (product is null)
+        {
+            return;
+        }
+
+        node.Normalize();
+        _commerceSelectedNodeId = node.Id;
+        Settings.AspectRatio = node.AspectRatio;
+        Settings.Size = BuildImageSize(Settings.AspectRatio, Settings.ResolutionTier);
+        _count = Math.Clamp(node.PlannedCount, 1, 8);
+        ActiveSession.Prompt = BuildCommerceNodePrompt(node);
+        _senderText = ActiveSession.Prompt;
+        SyncCommerceProductReferencesToActiveSession(product);
+        TouchCommerceWorkspace();
+        await SaveAsync();
+    }
+
+    private async Task GenerateCommerceNode(CommerceImageNode node)
+    {
+        await ApplyCommerceNodeToSession(node);
+        if (!_loading)
+        {
+            _commerceGeneratingNodeId = node.Id;
+            await GenerateAsync(ActiveSession.Prompt, addUserMessage: true, loadingLabel: $"正在生成{node.Title}");
+        }
+    }
+
+    private async Task GenerateCommerceEnabledNodes()
+    {
+        var plan = ActiveCommercePlan;
+        if (plan is null || _loading)
+        {
+            return;
+        }
+
+        foreach (var node in plan.Nodes.Where(node => node.Enabled).ToArray())
+        {
+            if (_cts?.IsCancellationRequested == true || !string.IsNullOrWhiteSpace(_error))
+            {
+                break;
+            }
+
+            await GenerateCommerceNode(node);
+        }
+    }
+
+    private void AttachGeneratedImagesToCommerceNode(IReadOnlyList<GeneratedImage> images)
+    {
+        if (images.Count == 0 || string.IsNullOrWhiteSpace(_commerceGeneratingNodeId))
+        {
+            return;
+        }
+
+        var plan = ActiveCommercePlan;
+        var node = plan?.Nodes.FirstOrDefault(node => node.Id == _commerceGeneratingNodeId);
+        if (plan is null || node is null)
+        {
+            return;
+        }
+
+        node.GeneratedImageIds.AddRange(images.Select(image => image.Id));
+        node.GeneratedImageIds = node.GeneratedImageIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .TakeLast(96)
+            .ToList();
+        node.SelectedImageId = images.Last().Id;
+        node.LastGeneratedAt = DateTimeOffset.Now;
+        node.Status = "已生成";
+        plan.UpdatedAt = DateTimeOffset.Now;
+        _commerceSelectedNodeId = node.Id;
+        TouchCommerceWorkspace();
+    }
+
+    private IReadOnlyList<GeneratedImage> GetCommerceNodeImages(CommerceImageNode? node)
+    {
+        if (node is null || node.GeneratedImageIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = node.GeneratedImageIds.ToHashSet(StringComparer.Ordinal);
+        return ActiveSession.Messages
+            .SelectMany(message => message.Images)
+            .Where(image => ids.Contains(image.Id))
+            .OrderByDescending(image => image.CreatedAt)
+            .ToArray();
+    }
+
+    private async Task SelectCommerceNodeImage(GeneratedImage image)
+    {
+        var node = ActiveCommerceNode;
+        if (node is null)
+        {
+            return;
+        }
+
+        node.SelectedImageId = image.Id;
+        node.Status = image.IsFavorite ? "已选片" : "已生成";
+        ActiveCommercePlan!.UpdatedAt = DateTimeOffset.Now;
+        TouchCommerceWorkspace();
+        await SaveAsync();
+    }
+
+    private async Task ToggleCommerceNodeImageFavorite(GeneratedImage image)
+    {
+        await ToggleFavorite(image);
+        await SelectCommerceNodeImage(image);
+        ActiveCommerceNode!.Status = image.IsFavorite ? "已选片" : "已生成";
+        TouchCommerceWorkspace();
+        await SaveAsync();
+    }
+
+    private void PreviewCommerceNodeImage(GeneratedImage image)
+    {
+        OpenImagePreview(image, ActiveCommerceNode?.Title ?? image.Prompt);
+    }
+
+    private Task UseCommerceNodeImageAsReference(GeneratedImage image) =>
+        UseImageAsReference(image, image.ReferenceRole);
+
+    private async Task ExportCommercePlan()
+    {
+        var product = ActiveCommerceProduct;
+        var plan = ActiveCommercePlan;
+        if (product is null || plan is null)
+        {
+            return;
+        }
+
+        var markdown = BuildCommercePlanMarkdown(product, plan);
+        var bytes = Encoding.UTF8.GetBytes(markdown);
+        var fileName = $"{SanitizeCommerceFileName(product.Name)}-image-plan-{DateTimeOffset.Now:yyyyMMdd-HHmm}.md";
+        await JsRuntime.InvokeVoidAsync(
+            "sonnetArt.downloadBytes",
+            Convert.ToBase64String(bytes),
+            fileName,
+            "text/markdown;charset=utf-8");
+        _downloadNotice = "图片规划书已导出。";
     }
 
     private static void ApplyCommerceProductAnalysis(CommerceProduct product, CommerceProductAnalysis analysis)
@@ -418,12 +697,172 @@ public partial class Home
             Goal = goal,
             AspectRatio = aspectRatio,
             PlannedCount = plannedCount,
+            Scene = ExtractCommerceNodeScene(instruction),
+            Composition = instruction,
+            KeyMessage = goal,
             Status = "待确认",
             Prompt = $"{facts}{Environment.NewLine}{Environment.NewLine}图片任务：{instruction}",
             NegativePrompt = negativePrompt,
             ReferenceRole = "product",
             Enabled = true,
         };
+    }
+
+    private static string ExtractCommerceNodeScene(string instruction)
+    {
+        var comma = instruction.IndexOf('，');
+        return comma > 0 ? instruction[..comma] : instruction;
+    }
+
+    private static string BuildCommerceNodePrompt(CommerceImageNode node)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(node.Prompt))
+        {
+            parts.Add(node.Prompt);
+        }
+
+        if (!string.IsNullOrWhiteSpace(node.Scene))
+        {
+            parts.Add($"场景：{node.Scene}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(node.Composition))
+        {
+            parts.Add($"构图：{node.Composition}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(node.KeyMessage))
+        {
+            parts.Add($"核心表达：{node.KeyMessage}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(node.NegativePrompt))
+        {
+            parts.Add($"避免：{node.NegativePrompt}");
+        }
+
+        return string.Join(Environment.NewLine + Environment.NewLine, parts);
+    }
+
+    private string BuildCommercePlanMarkdown(CommerceProduct product, CommerceImagePlan plan)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"# {plan.Title}");
+        builder.AppendLine();
+        builder.AppendLine($"- 商品：{product.Name}");
+        builder.AppendLine($"- 方案模型：{(string.IsNullOrWhiteSpace(plan.Model) ? "本地规划" : plan.Model)}");
+        builder.AppendLine($"- 更新时间：{plan.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm}");
+        builder.AppendLine($"- 节点：{plan.Nodes.Count}");
+        builder.AppendLine($"- 已归档图片：{plan.Nodes.Sum(node => node.GeneratedImageIds.Count)}");
+        if (!string.IsNullOrWhiteSpace(plan.StrategySummary))
+        {
+            builder.AppendLine($"- 策略：{plan.StrategySummary}");
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## 商品档案");
+        AppendCommerceMarkdownLine(builder, "描述", product.Description);
+        AppendCommerceMarkdownList(builder, "核心卖点", product.SellingPoints);
+        AppendCommerceMarkdownLine(builder, "规格", product.Specifications);
+        AppendCommerceMarkdownLine(builder, "目标人群", product.TargetAudience);
+        AppendCommerceMarkdownList(builder, "SKU", product.SkuVariants.Select(FormatCommerceSkuVariant));
+
+        if (product.Analysis.HasContent)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## AI 商品分析");
+            AppendCommerceMarkdownLine(builder, "产品类型", product.Analysis.ProductType);
+            AppendCommerceMarkdownLine(builder, "摘要", product.Analysis.Summary);
+            AppendCommerceMarkdownList(builder, "AI 卖点", product.Analysis.CoreSellingPoints);
+            AppendCommerceMarkdownList(builder, "适用场景", product.Analysis.UseScenarios);
+            AppendCommerceMarkdownList(builder, "颜色变体", product.Analysis.ColorVariants);
+            AppendCommerceMarkdownList(builder, "材质特性", product.Analysis.MaterialFeatures);
+            AppendCommerceMarkdownList(builder, "目标人群", product.Analysis.TargetAudiences);
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## 图片规划节点");
+        foreach (var node in plan.Nodes)
+        {
+            node.Normalize();
+            var images = GetCommerceNodeImages(node);
+            builder.AppendLine();
+            builder.AppendLine($"### {node.Title}");
+            builder.AppendLine();
+            builder.AppendLine($"- 类型：{node.Type}");
+            builder.AppendLine($"- 状态：{node.Status}");
+            builder.AppendLine($"- 启用：{(node.Enabled ? "是" : "否")}");
+            builder.AppendLine($"- 比例：{node.AspectRatio}");
+            builder.AppendLine($"- 计划数量：{node.PlannedCount}");
+            builder.AppendLine($"- 已生成：{images.Count}");
+            if (node.LastGeneratedAt is not null)
+            {
+                builder.AppendLine($"- 最近生成：{node.LastGeneratedAt.Value.ToLocalTime():yyyy-MM-dd HH:mm}");
+            }
+
+            AppendCommerceMarkdownLine(builder, "目标", node.Goal);
+            AppendCommerceMarkdownLine(builder, "场景", node.Scene);
+            AppendCommerceMarkdownLine(builder, "构图", node.Composition);
+            AppendCommerceMarkdownLine(builder, "核心信息", node.KeyMessage);
+            builder.AppendLine();
+            builder.AppendLine("提示词：");
+            builder.AppendLine("```text");
+            builder.AppendLine(node.Prompt);
+            builder.AppendLine("```");
+            if (!string.IsNullOrWhiteSpace(node.NegativePrompt))
+            {
+                builder.AppendLine();
+                builder.AppendLine("负向提示词：");
+                builder.AppendLine("```text");
+                builder.AppendLine(node.NegativePrompt);
+                builder.AppendLine("```");
+            }
+
+            if (images.Count > 0)
+            {
+                builder.AppendLine();
+                builder.AppendLine("图片结果：");
+                foreach (var image in images.OrderBy(image => image.CreatedAt))
+                {
+                    var selected = string.Equals(node.SelectedImageId, image.Id, StringComparison.Ordinal) ? " · 选片" : string.Empty;
+                    builder.AppendLine($"- {image.Id}{selected} · {image.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm} · {image.Size} · {image.RequestSummary}");
+                }
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendCommerceMarkdownLine(StringBuilder builder, string label, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            builder.AppendLine($"- {label}：{value.Trim()}");
+        }
+    }
+
+    private static void AppendCommerceMarkdownList(StringBuilder builder, string label, IEnumerable<string> values)
+    {
+        var items = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .ToArray();
+        if (items.Length == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine($"- {label}：{string.Join("；", items)}");
+    }
+
+    private static string SanitizeCommerceFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars().ToHashSet();
+        var cleaned = new string((value ?? string.Empty)
+            .Select(ch => invalid.Contains(ch) ? '-' : ch)
+            .ToArray()).Trim();
+        return string.IsNullOrWhiteSpace(cleaned) ? "commerce-product" : cleaned;
     }
 
     private static string BuildCommerceProductFacts(CommerceProduct product)

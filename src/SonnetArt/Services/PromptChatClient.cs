@@ -160,6 +160,28 @@ public sealed class PromptChatClient
         }
     }
 
+    public async Task<CommerceImagePlan> PlanCommerceImagesAsync(
+        StudioSettings settings,
+        CommerceProduct product,
+        IReadOnlyList<CommerceImageNode> seedNodes,
+        CancellationToken cancellationToken)
+    {
+        var content = await SendChatAsync(
+            settings,
+            [
+                new ChatMessage("system", BuildCommerceImagePlanSystemPrompt()),
+                new ChatMessage("user", BuildCommerceImagePlanUserPrompt(product, seedNodes)),
+            ],
+            temperature: 0.35,
+            cancellationToken);
+
+        var plan = JsonSerializer.Deserialize<CommerceImagePlan>(ExtractJson(content), JsonOptions)
+            ?? new CommerceImagePlan();
+        plan.Normalize();
+        plan.Model = StudioSettings.NormalizeChatModel(settings.ChatModel);
+        return plan;
+    }
+
     private static string BuildCopyWorkspaceSystemPrompt() =>
         """
         你是 SonnetArt 文案空间里的资深中文文案策划、诊断与改写助手。你的任务是帮助用户写作、改写、扩写、润色、提炼标题、生成营销文案、短视频脚本、广告文案、私域文案、品牌文案和内容结构。不要提作图。
@@ -227,6 +249,73 @@ public sealed class PromptChatClient
         已填目标人群：{product.TargetAudience}
         SKU 变体：{string.Join("；", product.SkuVariants.Select(variant => $"{variant.Name} {variant.Color} {variant.Sku}".Trim()))}
         参考图线索：{string.Join("；", references)}
+        """;
+    }
+
+    private static string BuildCommerceImagePlanSystemPrompt() =>
+        """
+        你是电商商品图首轮规划师。你只返回 JSON，不要解释，不要 Markdown。
+        根据商品档案和内置节点草案，生成一棵可编辑的商品图规划树，用于后续图片生成。
+        必须保留常见电商图片类型的覆盖：主图、场景图、细节图、对比图、尺寸图、A+ 图、包装图。可以调整标题、数量、构图和提示词，但不要编造品牌、认证、价格、疗效、活动政策或虚假文字。
+        输出的 prompt 要是可直接给图片模型的中文提示词，尽量明确画面、场景、构图、材质、光线、产品一致性和少量文字限制。
+        返回格式：
+        {
+          "title": "方案标题",
+          "strategySummary": "一句中文整体策略",
+          "nodes": [
+            {
+              "type": "main",
+              "title": "主图",
+              "goal": "节点目标",
+              "aspectRatio": "1:1",
+              "plannedCount": 4,
+              "scene": "场景/背景",
+              "composition": "构图方式",
+              "keyMessage": "要表达的核心信息",
+              "prompt": "完整图片提示词",
+              "negativePrompt": "负向提示词",
+              "referenceRole": "product",
+              "enabled": true,
+              "status": "AI 已规划"
+            }
+          ]
+        }
+        aspectRatio 只能使用 auto、1:1、3:4、2:3、9:16、3:2、4:3、16:9、21:9。plannedCount 为 1 到 12。nodes 保持 5 到 9 个。
+        """;
+
+    private static string BuildCommerceImagePlanUserPrompt(CommerceProduct product, IReadOnlyList<CommerceImageNode> seedNodes)
+    {
+        product.Normalize();
+        var seedJson = JsonSerializer.Serialize(seedNodes.Select(node => new
+        {
+            node.Type,
+            node.Title,
+            node.Goal,
+            node.AspectRatio,
+            node.PlannedCount,
+            node.Prompt,
+            node.NegativePrompt,
+        }), JsonOptions);
+
+        return $"""
+        商品档案：
+        商品名称：{product.Name}
+        商品描述：{product.Description}
+        已填卖点：{string.Join("；", product.SellingPoints)}
+        规格信息：{product.Specifications}
+        已填目标人群：{product.TargetAudience}
+        SKU 变体：{string.Join("；", product.SkuVariants.Select(variant => $"{variant.Name} {variant.Color} {variant.Sku}".Trim()))}
+        AI 分析：
+        产品类型：{product.Analysis.ProductType}
+        AI 提炼卖点：{string.Join("；", product.Analysis.CoreSellingPoints)}
+        适用场景：{string.Join("；", product.Analysis.UseScenarios)}
+        颜色变体：{string.Join("；", product.Analysis.ColorVariants)}
+        材质特性：{string.Join("；", product.Analysis.MaterialFeatures)}
+        AI 目标人群：{string.Join("；", product.Analysis.TargetAudiences)}
+        摘要：{product.Analysis.Summary}
+
+        内置首轮节点草案 JSON：
+        {seedJson}
         """;
     }
 

@@ -34,6 +34,20 @@ Authentication, quota enforcement, metering, billing, and model routing should l
 
 ## 🚀 Quick Start
 
+### Run locally
+
+From the repository root:
+
+```powershell
+.\start-web.ps1
+```
+
+On Windows, you can also run `start-web.cmd`. The script restores the required .NET workload, starts SonnetHost at `http://localhost:5131`, and opens the browser.
+
+Without any upstream configuration, SonnetArt proxies account and OpenAI-compatible image requests to `https://sonnet.vip`.
+
+### Run with Docker
+
 Create a `docker-compose.yml` and deploy SonnetArt together with a sub2api-compatible gateway:
 
 ```yaml
@@ -68,8 +82,8 @@ services:
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `SONNET_ART_PUBLIC_ORIGIN` | No | `:8080` | SonnetHost listen address. Containers usually keep `:8080`. |
-| `SONNET_ART_AI_UPSTREAM_URL` | Yes | - | OpenAI-compatible image model gateway URL. |
-| `SONNET_ART_ACCOUNT_UPSTREAM_URL` | Yes | - | Account / sub2api-compatible API URL. |
+| `SONNET_ART_AI_UPSTREAM_URL` | No | `https://sonnet.vip` | OpenAI-compatible image model gateway URL. |
+| `SONNET_ART_ACCOUNT_UPSTREAM_URL` | No | `https://sonnet.vip` | Account / sub2api-compatible API URL. |
 
 ## 🔗 Embedded Mode
 

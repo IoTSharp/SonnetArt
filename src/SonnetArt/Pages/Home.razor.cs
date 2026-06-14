@@ -282,11 +282,12 @@ public partial class Home
         ? "在底部输入描述，生成结果会永久保存在当前会话。"
         : "在底部输入需求，文案会永久保存在当前会话。";
     private string EmptyIcon => IsGraphicWorkspace ? "picture" : "file-text";
-    private string SenderPlaceholder => IsGraphicWorkspace ? "输入作图描述，按 Enter 生成..." : "输入文案需求，按 Enter 发送...";
-    private string SenderAccept => IsGraphicWorkspace ? "image/*" : string.Empty;
-    private int SenderMaxAttachments => IsGraphicWorkspace ? 16 : 0;
-    private string SenderUploadText => IsGraphicWorkspace ? "添加图片" : string.Empty;
-    private string SenderAttachmentsPlaceholder => IsGraphicWorkspace ? "选择、拖入或粘贴图片" : string.Empty;
+    private bool IsImageGenerationWorkspace => IsGraphicWorkspace || IsCommerceWorkspace;
+    private string SenderPlaceholder => IsImageGenerationWorkspace ? "输入作图描述，按 Enter 生成..." : "输入文案需求，按 Enter 发送...";
+    private string SenderAccept => IsImageGenerationWorkspace ? "image/*" : string.Empty;
+    private int SenderMaxAttachments => IsImageGenerationWorkspace ? 16 : 0;
+    private string SenderUploadText => IsImageGenerationWorkspace ? "添加图片" : string.Empty;
+    private string SenderAttachmentsPlaceholder => IsImageGenerationWorkspace ? "选择、拖入或粘贴图片" : string.Empty;
     private string WorkspaceStatus => IsCommerceWorkspace
         ? CommerceHasProducts
             ? $"商品档案 {CommerceWorkspace.Products.Count} 个 · 图片方案 {CommerceWorkspace.ImagePlans.Count} 套"
@@ -964,7 +965,7 @@ public partial class Home
             return;
         }
 
-        if (!IsGraphicWorkspace)
+        if (!IsGraphicWorkspace && !IsCommerceWorkspace)
         {
             await SendCopyTextAsync((promptOverride ?? ActiveSession.Prompt).Trim());
             return;
@@ -1037,6 +1038,10 @@ public partial class Home
                 Content = durableImages.Count == 0 ? "接口调用成功，但响应里没有解析到图片。" : "图片生成完成。",
                 Images = durableImages.ToList(),
             });
+            if (IsCommerceWorkspace)
+            {
+                AttachGeneratedImagesToCommerceNode(durableImages);
+            }
             completed = true;
         }
         catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
@@ -1063,6 +1068,7 @@ public partial class Home
             {
                 ClearSenderAttachments();
             }
+            _commerceGeneratingNodeId = null;
             TouchActiveSession();
             await SaveAsync();
             StateHasChanged();
