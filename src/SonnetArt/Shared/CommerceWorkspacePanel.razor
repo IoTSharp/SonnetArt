@@ -283,6 +283,25 @@
                 <p class="commerce-result-note">最近生成 @SelectedNode.LastGeneratedAt.Value.ToLocalTime().ToString("MM-dd HH:mm")</p>
             }
 
+            @if (SelectedNode is not null)
+            {
+                <div class="commerce-iteration-strip" aria-label="创意迭代">
+                    <span>创意迭代</span>
+                    <button type="button" title="派生光影版本" disabled="@(!CanIterateSelectedImage)" @onclick='() => OnIterateSelectedImage.InvokeAsync("lighting")'>
+                        <Icon Type="bulb" Theme="IconThemeType.Outline" />
+                    </button>
+                    <button type="button" title="派生质感版本" disabled="@(!CanIterateSelectedImage)" @onclick='() => OnIterateSelectedImage.InvokeAsync("texture")'>
+                        <Icon Type="skin" Theme="IconThemeType.Outline" />
+                    </button>
+                    <button type="button" title="派生风格版本" disabled="@(!CanIterateSelectedImage)" @onclick='() => OnIterateSelectedImage.InvokeAsync("style")'>
+                        <Icon Type="bg-colors" Theme="IconThemeType.Outline" />
+                    </button>
+                    <button type="button" title="派生详情页表达" disabled="@(!CanIterateSelectedImage)" @onclick='() => OnIterateSelectedImage.InvokeAsync("detail")'>
+                        <Icon Type="appstore" Theme="IconThemeType.Outline" />
+                    </button>
+                </div>
+            }
+
             @if (NodeImages.Count == 0)
             {
                 <div class="commerce-empty-block">
@@ -353,6 +372,7 @@
     [Parameter] public bool CanGeneratePlan { get; set; }
     [Parameter] public bool CanAnalyzeProduct { get; set; }
     [Parameter] public bool CanGenerateAllNodes { get; set; }
+    [Parameter] public bool CanIterateSelectedImage { get; set; }
     [Parameter] public string? AnalysisMessage { get; set; }
     [Parameter] public bool AnalysisMessageIsError { get; set; }
     [Parameter] public EventCallback OnNewProduct { get; set; }
@@ -367,6 +387,7 @@
     [Parameter] public EventCallback<CommerceImageNode> OnApplyNode { get; set; }
     [Parameter] public EventCallback<CommerceImageNode> OnGenerateNode { get; set; }
     [Parameter] public EventCallback OnGenerateAllNodes { get; set; }
+    [Parameter] public EventCallback<string> OnIterateSelectedImage { get; set; }
     [Parameter] public EventCallback OnExportPlan { get; set; }
     [Parameter] public EventCallback<GeneratedImage> OnSelectImage { get; set; }
     [Parameter] public EventCallback<GeneratedImage> OnToggleImageFavorite { get; set; }

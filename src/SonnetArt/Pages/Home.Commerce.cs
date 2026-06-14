@@ -62,6 +62,7 @@ public partial class Home
 
     private bool CommerceCanGeneratePlan => ActiveCommerceProduct is not null && !_loading;
     private bool CommerceCanAnalyzeProduct => ActiveCommerceProduct is not null && !_loading;
+    private bool CommerceCanIterateSelectedImage => ActiveCommerceNode is not null && ResolveCommerceIterationSourceImage(ActiveCommerceNode) is not null && !_loading;
     private string CommerceProductDialogTitle => _commerceEditingProductId is null ? "新增商品" : "编辑商品";
     private string CommerceProductDialogAction => _commerceEditingProductId is null ? "保存商品" : "保存修改";
     private bool CommerceProductSubmitDisabled => string.IsNullOrWhiteSpace(_commerceProductName);
@@ -365,6 +366,10 @@ public partial class Home
             return;
         }
 
+        var existingNode = plan.Nodes[index];
+        updatedNode.GeneratedImageIds = existingNode.GeneratedImageIds.ToList();
+        updatedNode.SelectedImageId = existingNode.SelectedImageId;
+        updatedNode.LastGeneratedAt = existingNode.LastGeneratedAt;
         updatedNode.Normalize();
         updatedNode.Status = updatedNode.Enabled ? "已编辑" : "已暂停";
         plan.Nodes[index] = updatedNode;
@@ -496,6 +501,50 @@ public partial class Home
 
     private Task UseCommerceNodeImageAsReference(GeneratedImage image) =>
         UseImageAsReference(image, image.ReferenceRole);
+
+    private async Task GenerateCommerceCreativeIteration(string mode)
+    {
+        var product = ActiveCommerceProduct;
+        var node = ActiveCommerceNode;
+        var sourceImage = ResolveCommerceIterationSourceImage(node);
+        if (product is null || node is null || sourceImage is null || _loading)
+        {
+            return;
+        }
+
+        var iteration = BuildCommerceIterationPrompt(mode, product, node, sourceImage);
+        ApplyImageSettings(sourceImage);
+        Settings.AspectRatio = StudioSettings.NormalizeAspectRatio(node.AspectRatio);
+        Settings.Size = BuildImageSize(Settings.AspectRatio, Settings.ResolutionTier);
+        _count = Math.Clamp(Math.Min(node.PlannedCount, 4), 1, 4);
+
+        ClearAllReferenceInputs();
+        ActiveSession.ImageReferences = sourceImage.Url;
+        ActiveSession.MaskReference = string.Empty;
+        ActiveSession.ReferenceRole = "content";
+        ActiveSession.Prompt = iteration.Prompt;
+        _senderText = iteration.Prompt;
+        ApplyResolvedMode("image");
+        _commerceGeneratingNodeId = node.Id;
+        node.Status = iteration.Status;
+        ActiveCommercePlan!.UpdatedAt = DateTimeOffset.Now;
+        TouchCommerceWorkspace();
+        await SaveAsync();
+
+        await GenerateAsync(iteration.Prompt, addUserMessage: true, loadingLabel: $"正在迭代{node.Title} · {iteration.Label}");
+    }
+
+    private GeneratedImage? ResolveCommerceIterationSourceImage(CommerceImageNode? node)
+    {
+        if (node is null)
+        {
+            return null;
+        }
+
+        var images = GetCommerceNodeImages(node);
+        return images.FirstOrDefault(image => string.Equals(image.Id, node.SelectedImageId, StringComparison.Ordinal))
+            ?? images.FirstOrDefault();
+    }
 
     private async Task ExportCommercePlan()
     {
@@ -745,6 +794,41 @@ public partial class Home
         return string.Join(Environment.NewLine + Environment.NewLine, parts);
     }
 
+    private static CommerceIterationPrompt BuildCommerceIterationPrompt(
+        string mode,
+        CommerceProduct product,
+        CommerceImageNode node,
+        GeneratedImage sourceImage)
+    {
+        var sourcePrompt = !string.IsNullOrWhiteSpace(sourceImage.RequestPrompt)
+            ? sourceImage.RequestPrompt
+            : sourceImage.Prompt;
+        var basePrompt = !string.IsNullOrWhiteSpace(node.Prompt)
+            ? node.Prompt
+            : sourcePrompt;
+        var normalizedMode = mode?.Trim().ToLowerInvariant();
+        var (label, focus, status) = normalizedMode switch
+        {
+            "texture" => ("质感", "强化产品材质、纹理、触感、边缘质感和工艺细节，保持商品结构、颜色和比例一致。", "质感迭代"),
+            "style" => ("风格", "在不改变商品真实性的前提下，探索更高级的电商视觉风格、背景调性和品牌感，保持可上架。", "风格迭代"),
+            "detail" => ("详情", "把画面转化为详情页表达，突出卖点、使用利益和局部信息层级，文字少且清晰，不编造品牌或参数。", "详情迭代"),
+            _ => ("光影", "优化布光、阴影、反光和空间层次，让商品更立体、更干净、更适合首轮选片。", "光影迭代"),
+        };
+
+        var prompt = string.Join(Environment.NewLine + Environment.NewLine, new[]
+        {
+            $"基于参考图为「{product.Name}」生成{node.Title}的{label}迭代版本。",
+            $"商品事实：{BuildCommerceProductFacts(product)}",
+            $"原节点目标：{node.Goal}",
+            $"迭代方向：{focus}",
+            $"原始提示词：{basePrompt}",
+            "保留产品主体、结构、颜色关系和关键卖点，不改变 SKU、不添加虚假 logo、认证、价格、功效或活动信息。",
+            string.IsNullOrWhiteSpace(node.NegativePrompt) ? string.Empty : $"避免：{node.NegativePrompt}",
+        }.Where(part => !string.IsNullOrWhiteSpace(part)));
+
+        return new CommerceIterationPrompt(label, prompt, status);
+    }
+
     private string BuildCommercePlanMarkdown(CommerceProduct product, CommerceImagePlan plan)
     {
         var builder = new StringBuilder();
@@ -944,4 +1028,6 @@ public partial class Home
         ApplyResolvedMode(product.ReferenceImages.Count > 0 ? "image" : "generate");
         TouchActiveSession(ActiveSession.Prompt);
     }
+
+    private sealed record CommerceIterationPrompt(string Label, string Prompt, string Status);
 }

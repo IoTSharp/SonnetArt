@@ -2157,6 +2157,50 @@ html[data-sonnetart-theme="dark"] .commerce-pane,
     margin: 0;
 }
 
+.commerce-iteration-strip {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(4, 32px);
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 7px;
+    border: 1px solid var(--studio-line);
+    border-radius: 8px;
+    background: var(--studio-control);
+}
+
+.commerce-iteration-strip span {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--studio-muted-strong);
+    font-size: 11px;
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.commerce-iteration-strip button {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--studio-line);
+    border-radius: 6px;
+    color: var(--studio-muted-strong);
+    background: var(--studio-soft);
+}
+
+.commerce-iteration-strip button:hover:not(:disabled) {
+    color: var(--studio-accent-ink);
+    border-color: var(--studio-accent-line);
+    background: var(--studio-accent-soft);
+}
+
+.commerce-iteration-strip button:disabled {
+    cursor: default;
+    opacity: 0.45;
+}
+
 .commerce-result-grid {
     display: grid;
     align-content: start;
