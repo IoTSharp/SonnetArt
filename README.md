@@ -21,11 +21,11 @@ English | [中文](README.zh.md)
 - 💾 Local browser persistence for studio state and user preferences.
 - 🔗 Embedded mode with launch parameters such as `theme`, `lang`, `ui_mode`, `src_host`, and `src_url`.
 - 🔐 sub2api auto-login through launch parameters such as `token`, `access_token`, `auth_token`, `jwt`, and `bearer_token`.
-- 🐳 Docker deployment with Caddy serving static assets and proxying account and OpenAI-compatible image APIs.
+- 🐳 Docker deployment with the ASP.NET Core SonnetHost serving static assets and proxying account and OpenAI-compatible image APIs.
 
 ## 🧭 Architecture
 
-SonnetArt is a frontend-first static web application. When deployed with Docker, the bundled Caddy server serves static assets and reverse proxies API traffic:
+SonnetArt is a frontend-first static web application. When deployed with Docker, the bundled ASP.NET Core 10 SonnetHost serves static assets and reverse proxies API traffic:
 
 - `/api/openai/*` proxies to `SONNET_ART_AI_UPSTREAM_URL` for an OpenAI-compatible image model gateway.
 - `/api/sonnet/*` proxies to `SONNET_ART_ACCOUNT_UPSTREAM_URL` and rewrites requests under `/api/v1` for account and sub2api-compatible APIs.
@@ -67,7 +67,7 @@ services:
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `SONNET_ART_PUBLIC_ORIGIN` | No | `:8080` | Caddy listen address. Containers usually keep `:8080`. |
+| `SONNET_ART_PUBLIC_ORIGIN` | No | `:8080` | SonnetHost listen address. Containers usually keep `:8080`. |
 | `SONNET_ART_AI_UPSTREAM_URL` | Yes | - | OpenAI-compatible image model gateway URL. |
 | `SONNET_ART_ACCOUNT_UPSTREAM_URL` | Yes | - | Account / sub2api-compatible API URL. |
 

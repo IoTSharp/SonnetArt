@@ -1,13 +1,10 @@
-FROM caddy:2-alpine
-WORKDIR /srv
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine
+WORKDIR /app
 
-COPY wwwroot/ /srv/
-COPY Caddyfile.template /etc/caddy/Caddyfile.template
-COPY docker-entrypoint.sh /usr/local/bin/sonnetart-entrypoint
-
-RUN chmod +x /usr/local/bin/sonnetart-entrypoint
+COPY app/ ./
+COPY wwwroot/ ./wwwroot/
 
 ENV SONNET_ART_PUBLIC_ORIGIN=:8080
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/sonnetart-entrypoint"]
+ENTRYPOINT ["dotnet", "SonnetHost.dll"]

@@ -12,17 +12,18 @@ RUN dotnet publish src/SonnetArt/SonnetArt.csproj \
     -f net10.0 \
     -o /out \
     /p:RunAOTCompilation=true
+RUN dotnet publish src/SonnetHost/SonnetHost.csproj \
+    -c Release \
+    -f net10.0 \
+    -o /app
 
-FROM caddy:2-alpine
-WORKDIR /srv
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine
+WORKDIR /app
 
-COPY --from=build /out/wwwroot/ /srv/
-COPY deploy/Caddyfile.template /etc/caddy/Caddyfile.template
-COPY deploy/docker-entrypoint.sh /usr/local/bin/sonnetart-entrypoint
-
-RUN chmod +x /usr/local/bin/sonnetart-entrypoint
+COPY --from=build /app/ ./
+COPY --from=build /out/wwwroot/ ./wwwroot/
 
 ENV SONNET_ART_PUBLIC_ORIGIN=:8080
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/sonnetart-entrypoint"]
+ENTRYPOINT ["dotnet", "SonnetHost.dll"]

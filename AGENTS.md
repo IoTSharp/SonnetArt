@@ -14,7 +14,7 @@
 - The target framework is `net10.0`.
 - WebAssembly AOT is enabled by default through `RunAOTCompilation=true`.
 - `external/AntDesignXBlazor` is a required submodule; local development and CI need recursive checkout.
-- The Dockerfile runs `dotnet workload restore`, then publishes static assets with `RunAOTCompilation=true`.
+- The Dockerfile runs `dotnet workload restore`, publishes static assets with `RunAOTCompilation=true`, publishes `src/SonnetHost`, and runs the container on ASP.NET Core rather than Caddy.
 - Runtime upstream URLs are injected with environment variables and are not baked into the image at build time.
 - `bin/`, `obj/`, and `artifacts/` are generated outputs and should stay ignored.
 

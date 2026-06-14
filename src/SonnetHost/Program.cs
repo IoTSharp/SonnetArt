@@ -1,0 +1,164 @@
+using System.Net;
+using System.IO.Compression;
+using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.AspNetCore.StaticFiles;
+using SonnetHost.Proxy;
+
+var builder = WebApplication.CreateSlimBuilder(args);
+
+builder.WebHost.UseUrls(ResolveListenUrl());
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+    [
+        "application/octet-stream",
+        "application/wasm",
+    ]);
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.AddHttpClient(SonnetProxyEndpoints.HttpClientName, client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(10);
+    client.DefaultRequestVersion = HttpVersion.Version11;
+    client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+})
+.ConfigurePrimaryHttpMessageHandler(CreateProxyHandler);
+
+var app = builder.Build();
+
+app.Use(async (context, next) =>
+{
+    if (SonnetArtStaticFileApplicationBuilderExtensions.ShouldDisableHtmlCache(context.Request.Path))
+    {
+        context.Response.OnStarting(() =>
+        {
+            if (!context.Response.HasStarted &&
+                context.Response.StatusCode == StatusCodes.Status200OK &&
+                SonnetArtStaticFileApplicationBuilderExtensions.IsHtmlResponse(context.Response.ContentType))
+            {
+                SonnetArtStaticFileApplicationBuilderExtensions.DisableResponseCache(context.Response);
+            }
+
+            return Task.CompletedTask;
+        });
+    }
+
+    try
+    {
+        await next(context);
+    }
+    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+    {
+    }
+});
+
+app.UseSonnetArtSecurityHeaders();
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapSonnetProxyEndpoints();
+app.UseResponseCompression();
+app.UseSonnetArtStaticFiles();
+app.MapFallbackToFile("index.html");
+
+await app.RunAsync();
+
+static string ResolveListenUrl()
+{
+    var publicOrigin = Environment.GetEnvironmentVariable("SONNET_ART_PUBLIC_ORIGIN");
+    if (!string.IsNullOrWhiteSpace(publicOrigin))
+    {
+        var origin = publicOrigin.Trim();
+        return origin.StartsWith(':')
+            ? $"http://+{origin}"
+            : origin;
+    }
+
+    var urls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+    return string.IsNullOrWhiteSpace(urls)
+        ? "http://+:8080"
+        : urls;
+}
+
+static SocketsHttpHandler CreateProxyHandler()
+{
+    return new SocketsHttpHandler
+    {
+        AutomaticDecompression = DecompressionMethods.All,
+        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(20),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+    };
+}
+
+internal static class SonnetArtStaticFileApplicationBuilderExtensions
+{
+    public static IApplicationBuilder UseSonnetArtSecurityHeaders(this IApplicationBuilder app)
+    {
+        return app.Use(async (context, next) =>
+        {
+            context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+
+            await next(context);
+        });
+    }
+
+    public static IApplicationBuilder UseSonnetArtStaticFiles(this IApplicationBuilder app)
+    {
+        var contentTypeProvider = new FileExtensionContentTypeProvider();
+        contentTypeProvider.Mappings[".dat"] = "application/octet-stream";
+        contentTypeProvider.Mappings[".dll"] = "application/octet-stream";
+        contentTypeProvider.Mappings[".wasm"] = "application/wasm";
+        contentTypeProvider.Mappings[".webcil"] = "application/octet-stream";
+
+        return app.UseStaticFiles(new StaticFileOptions
+        {
+            ContentTypeProvider = contentTypeProvider,
+            OnPrepareResponse = context =>
+            {
+                var path = context.Context.Request.Path;
+                if (IsNoCacheAsset(path))
+                {
+                    DisableResponseCache(context.Context.Response);
+                }
+            },
+        });
+    }
+
+    private static bool IsNoCacheAsset(PathString path)
+    {
+        return path.Equals("/", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/index.html", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/_framework/blazor.boot.json", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWithSegments("/_framework/blazor.boot", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/service-worker-assets.js", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool ShouldDisableHtmlCache(PathString path)
+    {
+        return path.Equals("/", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/index.html", StringComparison.OrdinalIgnoreCase) ||
+            !Path.HasExtension(path.Value);
+    }
+
+    public static bool IsHtmlResponse(string? contentType)
+    {
+        return contentType is not null &&
+            contentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static void DisableResponseCache(HttpResponse response)
+    {
+        response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+        response.Headers.Pragma = "no-cache";
+        response.Headers.Expires = "0";
+    }
+}

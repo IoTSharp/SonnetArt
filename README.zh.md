@@ -21,11 +21,11 @@
 - 💾 本地状态保存：在浏览器中保存工作台状态和用户偏好。
 - 🔗 嵌入模式：支持 `theme`、`lang`、`ui_mode`、`src_host`、`src_url` 等启动参数。
 - 🔐 sub2api 自动登录：支持通过 `token`、`access_token`、`auth_token`、`jwt`、`bearer_token` 等参数注入登录态。
-- 🐳 Docker 部署：镜像内使用 Caddy 提供静态资源，并代理账号接口与 OpenAI 兼容图像接口。
+- 🐳 Docker 部署：镜像内使用 ASP.NET Core SonnetHost 提供静态资源，并代理账号接口与 OpenAI 兼容图像接口。
 
 ## 🧭 架构说明
 
-SonnetArt 是前端优先的静态 Web 应用。使用 Docker 部署时，容器内的 Caddy 会承担静态资源服务和 API 反向代理：
+SonnetArt 是前端优先的静态 Web 应用。使用 Docker 部署时，容器内的 ASP.NET Core 10 SonnetHost 会承担静态资源服务和 API 反向代理：
 
 - `/api/openai/*` 转发到 `SONNET_ART_AI_UPSTREAM_URL`，用于访问 OpenAI 兼容的图像模型网关。
 - `/api/sonnet/*` 转发到 `SONNET_ART_ACCOUNT_UPSTREAM_URL`，并重写到 `/api/v1`，用于访问账号和 sub2api 兼容接口。
@@ -67,7 +67,7 @@ services:
 
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `SONNET_ART_PUBLIC_ORIGIN` | 否 | `:8080` | Caddy 监听地址。容器内通常保持 `:8080`。 |
+| `SONNET_ART_PUBLIC_ORIGIN` | 否 | `:8080` | SonnetHost 监听地址。容器内通常保持 `:8080`。 |
 | `SONNET_ART_AI_UPSTREAM_URL` | 是 | - | OpenAI 兼容图像模型网关地址。 |
 | `SONNET_ART_ACCOUNT_UPSTREAM_URL` | 是 | - | 账号 / sub2api 兼容 API 地址。 |
 
