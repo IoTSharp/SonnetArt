@@ -43,6 +43,7 @@ builder.Services.AddHttpClient("prompt-library-images", client =>
     client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
 })
 .ConfigurePrimaryHttpMessageHandler(CreateProxyHandler);
+builder.Services.AddHostedService<PromptLibraryImageCacheWarmupService>();
 
 var app = builder.Build();
 

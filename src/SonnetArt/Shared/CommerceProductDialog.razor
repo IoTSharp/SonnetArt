@@ -12,72 +12,114 @@
                 </button>
             </header>
 
-            <div class="commerce-product-form">
-                <label class="studio-field">
-                    <span class="studio-label">商品名称</span>
-                    <input class="studio-input" value="@Name" @oninput="NameChanged" placeholder="例如：不锈钢保温杯 600ml" />
-                </label>
-
-                <label class="studio-field">
-                    <span class="studio-label">目标人群</span>
-                    <input class="studio-input" value="@TargetAudience" @oninput="TargetAudienceChanged" placeholder="例如：通勤白领、户外徒步用户、学生" />
-                </label>
-
-                <label class="studio-field commerce-field-wide">
-                    <span class="studio-label">商品描述</span>
-                    <textarea class="studio-textarea" value="@Description" @oninput="DescriptionChanged" placeholder="描述材质、功能、定位、使用场景和品牌调性"></textarea>
-                </label>
-
-                <label class="studio-field">
-                    <span class="studio-label">核心卖点</span>
-                    <textarea class="studio-textarea" value="@SellingPoints" @oninput="SellingPointsChanged" placeholder="每行一个卖点，例如：&#10;316 不锈钢内胆&#10;24 小时保温&#10;单手开盖防漏"></textarea>
-                </label>
-
-                <label class="studio-field">
-                    <span class="studio-label">规格信息</span>
-                    <textarea class="studio-textarea" value="@Specifications" @oninput="SpecificationsChanged" placeholder="容量、尺寸、重量、材质、包装清单等"></textarea>
-                </label>
-
-                <label class="studio-field">
-                    <span class="studio-label">产品参考图</span>
-                    <textarea class="studio-textarea" value="@ReferenceImages" @oninput="ReferenceImagesChanged" placeholder="每行一个图片 URL 或 file-...，本地上传会自动加入这里。"></textarea>
-                </label>
-
-                <div class="studio-field">
-                    <span class="studio-label">上传产品图</span>
-                    <InputFile class="studio-file"
-                               accept="image/*"
-                               multiple
-                               OnChange="@ReferenceFilesChanged" />
-                    <small class="studio-helper">上传后默认作为 product 参考图角色。</small>
-                </div>
-
-                @if (ReferenceImageItems.Count > 0)
-                {
-                    <div class="commerce-reference-grid commerce-field-wide">
-                        @foreach (var item in ReferenceImageItems)
-                        {
-                            <figure>
-                                @if (item.IsImage)
-                                {
-                                    <img src="@item.Value" alt="产品参考图" />
-                                }
-                                else
-                                {
-                                    <Icon Type="link" Theme="IconThemeType.Outline" />
-                                }
-                                <figcaption>@item.Label</figcaption>
-                            </figure>
-                        }
+            @if (CaptureOnly)
+            {
+                <div class="commerce-product-upload-flow">
+                    <div class="commerce-product-dropzone">
+                        <Icon Type="picture" Theme="IconThemeType.Outline" />
+                        <strong>上传产品图</strong>
+                        <span>可选择 1 张或多张图片，系统会识别商品并自动生成商品名称、描述、卖点、规格、人群和 SKU。</span>
+                        <InputFile class="studio-file"
+                                   accept="image/*"
+                                   multiple
+                                   disabled="@Busy"
+                                   OnChange="@ReferenceFilesChanged" />
                     </div>
-                }
 
-                <label class="studio-field">
-                    <span class="studio-label">SKU 变体</span>
-                    <textarea class="studio-textarea" value="@SkuVariants" @oninput="SkuVariantsChanged" placeholder="每行一个：名称 | 颜色 | 材质 | 尺寸 | 套装 | SKU，例如：&#10;晨雾白 | 白色 | 316 不锈钢 | 600ml | 单杯装 | CUP-WHITE-600&#10;松石绿 | 绿色 | 316 不锈钢 | 600ml | 双杯套装 | CUP-GREEN-SET"></textarea>
-                    <small class="studio-helper">旧格式“名称 | 颜色 | SKU”仍可直接使用。</small>
-                </label>
-            </div>
+                    @if (Busy)
+                    {
+                        <p class="commerce-product-status">
+                            <Icon Type="loading" Theme="IconThemeType.Outline" />
+                            <span>正在识别图片并编写商品档案...</span>
+                        </p>
+                    }
+
+                    @if (ReferenceImageItems.Count > 0)
+                    {
+                        <div class="commerce-reference-grid">
+                            @foreach (var item in ReferenceImageItems)
+                            {
+                                <figure>
+                                    @if (item.IsImage)
+                                    {
+                                        <img src="@item.Value" alt="产品参考图" />
+                                    }
+                                    else
+                                    {
+                                        <Icon Type="link" Theme="IconThemeType.Outline" />
+                                    }
+                                    <figcaption>@item.Label</figcaption>
+                                </figure>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="commerce-product-form">
+                    <label class="studio-field">
+                        <span class="studio-label">商品名称</span>
+                        <input class="studio-input" value="@Name" @oninput="NameChanged" placeholder="例如：不锈钢保温杯 600ml" />
+                    </label>
+
+                    <label class="studio-field">
+                        <span class="studio-label">目标人群</span>
+                        <input class="studio-input" value="@TargetAudience" @oninput="TargetAudienceChanged" placeholder="例如：通勤白领、户外徒步用户、学生" />
+                    </label>
+
+                    <label class="studio-field commerce-field-wide">
+                        <span class="studio-label">商品描述</span>
+                        <textarea class="studio-textarea" value="@Description" @oninput="DescriptionChanged" placeholder="描述材质、功能、定位、使用场景和品牌调性"></textarea>
+                    </label>
+
+                    <label class="studio-field">
+                        <span class="studio-label">核心卖点</span>
+                        <textarea class="studio-textarea" value="@SellingPoints" @oninput="SellingPointsChanged" placeholder="每行一个卖点，例如：&#10;316 不锈钢内胆&#10;24 小时保温&#10;单手开盖防漏"></textarea>
+                    </label>
+
+                    <label class="studio-field">
+                        <span class="studio-label">规格信息</span>
+                        <textarea class="studio-textarea" value="@Specifications" @oninput="SpecificationsChanged" placeholder="容量、尺寸、重量、材质、包装清单等"></textarea>
+                    </label>
+
+                    <div class="studio-field">
+                        <span class="studio-label">追加产品图</span>
+                        <InputFile class="studio-file"
+                                   accept="image/*"
+                                   multiple
+                                   disabled="@Busy"
+                                   OnChange="@ReferenceFilesChanged" />
+                        <small class="studio-helper">上传后默认作为 product 参考图角色。</small>
+                    </div>
+
+                    @if (ReferenceImageItems.Count > 0)
+                    {
+                        <div class="commerce-reference-grid commerce-field-wide">
+                            @foreach (var item in ReferenceImageItems)
+                            {
+                                <figure>
+                                    @if (item.IsImage)
+                                    {
+                                        <img src="@item.Value" alt="产品参考图" />
+                                    }
+                                    else
+                                    {
+                                        <Icon Type="link" Theme="IconThemeType.Outline" />
+                                    }
+                                    <figcaption>@item.Label</figcaption>
+                                </figure>
+                            }
+                        </div>
+                    }
+
+                    <label class="studio-field commerce-field-wide">
+                        <span class="studio-label">SKU 变体</span>
+                        <textarea class="studio-textarea" value="@SkuVariants" @oninput="SkuVariantsChanged" placeholder="每行一个：名称 | 颜色 | 材质 | 尺寸 | 套装 | SKU，例如：&#10;晨雾白 | 白色 | 316 不锈钢 | 600ml | 单杯装 | CUP-WHITE-600&#10;松石绿 | 绿色 | 316 不锈钢 | 600ml | 双杯套装 | CUP-GREEN-SET"></textarea>
+                        <small class="studio-helper">旧格式“名称 | 颜色 | SKU”仍可直接使用。</small>
+                    </label>
+                </div>
+            }
 
             @if (!string.IsNullOrWhiteSpace(Error))
             {
@@ -85,13 +127,16 @@
             }
 
             <footer>
-                <button type="button" class="studio-button studio-button-light" @onclick="OnCancel">
+                <button type="button" class="studio-button studio-button-light" disabled="@Busy" @onclick="OnCancel">
                     <span>取消</span>
                 </button>
-                <button type="button" class="studio-button studio-button-primary" disabled="@SubmitDisabled" @onclick="OnSubmit">
-                    <Icon Type="save" Theme="IconThemeType.Outline" />
-                    <span>@SubmitText</span>
-                </button>
+                @if (!CaptureOnly)
+                {
+                    <button type="button" class="studio-button studio-button-primary" disabled="@SubmitDisabled" @onclick="OnSubmit">
+                        <Icon Type="save" Theme="IconThemeType.Outline" />
+                        <span>@SubmitText</span>
+                    </button>
+                }
             </footer>
         </section>
     </div>
@@ -102,6 +147,8 @@
     [Parameter] public string Title { get; set; } = "新增商品";
     [Parameter] public string SubmitText { get; set; } = "保存商品";
     [Parameter] public bool SubmitDisabled { get; set; }
+    [Parameter] public bool CaptureOnly { get; set; }
+    [Parameter] public bool Busy { get; set; }
     [Parameter] public string? Error { get; set; }
     [Parameter] public string Name { get; set; } = string.Empty;
     [Parameter] public string Description { get; set; } = string.Empty;

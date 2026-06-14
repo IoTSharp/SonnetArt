@@ -84,7 +84,12 @@ public partial class Home
         !_loading;
     private string CommerceProductDialogTitle => _commerceEditingProductId is null ? "新增商品" : "编辑商品";
     private string CommerceProductDialogAction => _commerceEditingProductId is null ? "保存商品" : "保存修改";
-    private bool CommerceProductSubmitDisabled => string.IsNullOrWhiteSpace(_commerceProductName);
+    private bool CommerceProductDialogCaptureOnly => _commerceEditingProductId is null;
+    private bool CommerceProductDialogBusy => _loading && string.Equals(_loadingLabel, "正在识别商品", StringComparison.Ordinal);
+    private bool CommerceProductSubmitDisabled => CommerceProductDialogBusy ||
+        (_commerceEditingProductId is null
+            ? string.IsNullOrWhiteSpace(_commerceProductReferenceImages)
+            : string.IsNullOrWhiteSpace(_commerceProductName));
     private string? CommerceAnalysisMessage => _commerceAnalysisMessage;
     private bool CommerceAnalysisIsError => _commerceAnalysisIsError;
 
@@ -924,6 +929,23 @@ public partial class Home
         analysis.Normalize();
         product.Analysis = analysis;
 
+        if (IsCommerceFallbackProductName(product.Name) && !string.IsNullOrWhiteSpace(analysis.ProductName))
+        {
+            product.Name = analysis.ProductName;
+        }
+
+        if (string.IsNullOrWhiteSpace(product.Description))
+        {
+            product.Description = !string.IsNullOrWhiteSpace(analysis.Summary)
+                ? analysis.Summary
+                : analysis.ProductType;
+        }
+
+        if (string.IsNullOrWhiteSpace(product.Specifications) && !string.IsNullOrWhiteSpace(analysis.Specifications))
+        {
+            product.Specifications = analysis.Specifications;
+        }
+
         if (product.SellingPoints.Count == 0 && analysis.CoreSellingPoints.Count > 0)
         {
             product.SellingPoints = analysis.CoreSellingPoints.ToList();
@@ -932,6 +954,11 @@ public partial class Home
         if (string.IsNullOrWhiteSpace(product.TargetAudience) && analysis.TargetAudiences.Count > 0)
         {
             product.TargetAudience = string.Join("、", analysis.TargetAudiences.Take(3));
+        }
+
+        if (product.SkuVariants.Count == 0 && analysis.SkuVariants.Count > 0)
+        {
+            product.SkuVariants = analysis.SkuVariants.ToList();
         }
 
         if (product.SkuVariants.Count == 0 && analysis.ColorVariants.Count > 0)
@@ -946,6 +973,39 @@ public partial class Home
         }
 
         product.Normalize();
+    }
+
+    private static void ApplyCommerceGeneratedFields(CommerceProduct product)
+    {
+        if (string.IsNullOrWhiteSpace(product.Name))
+        {
+            product.Name = "图片识别商品";
+        }
+
+        if (string.IsNullOrWhiteSpace(product.Description) && product.ReferenceImages.Count > 0)
+        {
+            product.Description = "基于上传产品图创建的商品档案。";
+        }
+
+        product.Normalize();
+    }
+
+    private static string BuildCommerceFallbackProductName(IReadOnlyCollection<string> references)
+    {
+        return references.Count switch
+        {
+            <= 0 => "图片识别商品",
+            1 => "图片识别商品",
+            _ => $"图片识别商品 {references.Count} 张",
+        };
+    }
+
+    private static bool IsCommerceFallbackProductName(string value)
+    {
+        var name = value?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(name) ||
+            string.Equals(name, "图片识别商品", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("图片识别商品 ", StringComparison.OrdinalIgnoreCase);
     }
 
     private IEnumerable<CommerceExportManifestItem> BuildCommerceExportItems(
@@ -1340,6 +1400,85 @@ public partial class Home
             .Where(reference => !string.IsNullOrWhiteSpace(reference))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(CommerceMaxReferenceImages));
+
+        if (_commerceEditingProductId is null && references.Count > 0)
+        {
+            await CreateCommerceProductFromUploadedReferences();
+        }
+    }
+
+    private async Task CreateCommerceProductFromUploadedReferences()
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        var references = SplitCommerceReferenceImages(_commerceProductReferenceImages).ToList();
+        if (references.Count == 0)
+        {
+            _commerceProductError = "请先上传至少一张商品图片。";
+            return;
+        }
+
+        var product = new CommerceProduct
+        {
+            Name = BuildCommerceFallbackProductName(references),
+            ReferenceImages = references,
+            ReferenceRole = "product",
+            CreatedAt = DateTimeOffset.Now,
+            UpdatedAt = DateTimeOffset.Now,
+        };
+        product.Normalize();
+
+        _commerceProductError = null;
+        _commerceAnalysisMessage = null;
+        _commerceAnalysisIsError = false;
+        _loading = true;
+        _loadingLabel = "正在识别商品";
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        StateHasChanged();
+
+        try
+        {
+            if (ChatReady)
+            {
+                var analysis = await ChatClient.AnalyzeCommerceProductAsync(Settings, product, _cts.Token);
+                ApplyCommerceProductAnalysis(product, analysis);
+                ApplyCommerceGeneratedFields(product);
+                _commerceAnalysisMessage = "已根据产品图生成商品档案。";
+            }
+            else
+            {
+                ApplyCommerceGeneratedFields(product);
+                _commerceAnalysisMessage = "已保存产品图。登录后可使用 AI 识别商品档案。";
+            }
+
+            product.UpdatedAt = DateTimeOffset.Now;
+            product.Normalize();
+            CommerceWorkspace.Products.Insert(0, product);
+            CommerceWorkspace.ActiveProductId = product.Id;
+            SyncCommerceProductReferencesToActiveSession(product);
+            TouchCommerceWorkspace();
+            _commerceProductDialogOpen = false;
+            _commerceProductError = null;
+            await SaveAsync();
+        }
+        catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
+        {
+            _commerceProductError = "本次商品识别已取消。";
+        }
+        catch (Exception ex)
+        {
+            _commerceProductError = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            _loadingLabel = "正在请求图像接口";
+            StateHasChanged();
+        }
     }
 
     private string CommerceProductItemClass(CommerceProduct product) =>

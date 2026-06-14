@@ -468,33 +468,57 @@ public sealed class CommerceProduct
 
 public sealed class CommerceProductAnalysis
 {
+    public string ProductName { get; set; } = string.Empty;
     public string ProductType { get; set; } = string.Empty;
     public List<string> CoreSellingPoints { get; set; } = [];
     public List<string> UseScenarios { get; set; } = [];
     public List<string> ColorVariants { get; set; } = [];
     public List<string> MaterialFeatures { get; set; } = [];
     public List<string> TargetAudiences { get; set; } = [];
+    public string Specifications { get; set; } = string.Empty;
+    public List<CommerceSkuVariant> SkuVariants { get; set; } = [];
     public string Summary { get; set; } = string.Empty;
     public DateTimeOffset? AnalyzedAt { get; set; }
 
     [JsonIgnore]
     public bool HasContent =>
+        !string.IsNullOrWhiteSpace(ProductName) ||
         !string.IsNullOrWhiteSpace(ProductType) ||
         CoreSellingPoints.Count > 0 ||
         UseScenarios.Count > 0 ||
         ColorVariants.Count > 0 ||
         MaterialFeatures.Count > 0 ||
         TargetAudiences.Count > 0 ||
+        !string.IsNullOrWhiteSpace(Specifications) ||
+        SkuVariants.Count > 0 ||
         !string.IsNullOrWhiteSpace(Summary);
 
     public void Normalize()
     {
+        ProductName = ProductName?.Trim() ?? string.Empty;
         ProductType = ProductType?.Trim() ?? string.Empty;
         CoreSellingPoints = NormalizeList(CoreSellingPoints, 12, 128);
         UseScenarios = NormalizeList(UseScenarios, 12, 128);
         ColorVariants = NormalizeList(ColorVariants, 20, 96);
         MaterialFeatures = NormalizeList(MaterialFeatures, 12, 128);
         TargetAudiences = NormalizeList(TargetAudiences, 12, 128);
+        Specifications = Specifications?.Trim() ?? string.Empty;
+        SkuVariants ??= [];
+        foreach (var variant in SkuVariants)
+        {
+            variant.Normalize();
+        }
+
+        SkuVariants = SkuVariants
+            .Where(variant =>
+                !string.IsNullOrWhiteSpace(variant.Name) ||
+                !string.IsNullOrWhiteSpace(variant.Color) ||
+                !string.IsNullOrWhiteSpace(variant.Material) ||
+                !string.IsNullOrWhiteSpace(variant.Size) ||
+                !string.IsNullOrWhiteSpace(variant.Package) ||
+                !string.IsNullOrWhiteSpace(variant.Sku))
+            .Take(24)
+            .ToList();
         Summary = Summary?.Trim() ?? string.Empty;
     }
 

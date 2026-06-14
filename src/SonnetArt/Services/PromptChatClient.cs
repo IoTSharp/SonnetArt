@@ -174,11 +174,16 @@ public sealed class PromptChatClient
         CommerceProduct product,
         CancellationToken cancellationToken)
     {
+        product.Normalize();
+        var userPrompt = BuildCommerceProductAnalysisUserPrompt(product);
+        var userContent = ChatContent.FromTextAndImages(
+            userPrompt,
+            product.ReferenceImages.Where(IsVisionReference).Take(6));
         var content = await SendChatAsync(
             settings,
             [
                 new ChatMessage("system", BuildCommerceProductAnalysisSystemPrompt()),
-                new ChatMessage("user", BuildCommerceProductAnalysisUserPrompt(product)),
+                new ChatMessage("user", userContent),
             ],
             temperature: 0.2,
             cancellationToken);
@@ -695,14 +700,27 @@ public sealed class PromptChatClient
         你是电商商品图策划中的商品理解分析器。你只返回 JSON，不要解释，不要 Markdown。
         根据商品名称、描述、卖点、规格、目标人群、SKU 和参考图线索，提炼用于商品图规划的稳定事实。
         不要编造品牌、认证、价格、疗效、夸张承诺或无法从输入合理推断的信息；不确定时用保守表述。
+        如果用户只上传图片且没有文字档案，请直接识别图片中的产品主体、包装可见信息、颜色/材质/容量/数量/套装等，并生成商品档案字段。
         返回格式：
         {
+          "productName": "可上架使用的简短商品名称",
           "productType": "简短产品类型",
           "coreSellingPoints": ["核心卖点1"],
           "useScenarios": ["适用场景1"],
           "colorVariants": ["颜色或外观变体1"],
           "materialFeatures": ["材质/工艺/触感特性1"],
           "targetAudiences": ["目标人群1"],
+          "specifications": "容量、尺寸、重量、材质、包装清单等；图片不能确认则只写可见信息",
+          "skuVariants": [
+            {
+              "name": "变体名称",
+              "color": "颜色",
+              "material": "材质",
+              "size": "尺寸/容量",
+              "package": "套装/数量",
+              "sku": ""
+            }
+          ],
           "summary": "一句中文商品图策划摘要"
         }
         每个数组最多 8 项，每项不超过 24 个中文字符。
@@ -724,7 +742,15 @@ public sealed class PromptChatClient
         已填目标人群：{product.TargetAudience}
         SKU 变体：{string.Join("；", product.SkuVariants.Select(variant => $"{variant.Name} {variant.Color} {variant.Sku}".Trim()))}
         参考图线索：{string.Join("；", references)}
+        请优先根据随消息附带的图片识别商品，并把可用于电商商品图和详情页的内容结构化返回。
         """;
+    }
+
+    private static bool IsVisionReference(string value)
+    {
+        return value.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase) ||
+            Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+            uri.Scheme is "http" or "https";
     }
 
     private static string BuildCommerceImagePlanSystemPrompt() =>
@@ -1020,7 +1046,38 @@ internal sealed record ChatCompletionRequest(
 
 internal sealed record ChatMessage(
     [property: JsonPropertyName("role")] string Role,
-    [property: JsonPropertyName("content")] string Content);
+    [property: JsonPropertyName("content")] object Content);
+
+internal static class ChatContent
+{
+    public static object FromTextAndImages(string text, IEnumerable<string> imageUrls)
+    {
+        var parts = new List<ChatContentPart>
+        {
+            ChatContentPart.FromText(text),
+        };
+
+        foreach (var imageUrl in imageUrls)
+        {
+            parts.Add(ChatContentPart.FromImage(imageUrl));
+        }
+
+        return parts.Count == 1 ? text : parts;
+    }
+}
+
+internal sealed record ChatContentPart(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("text")] string? Text = null,
+    [property: JsonPropertyName("image_url")] ChatImageUrl? ImageUrl = null)
+{
+    public static ChatContentPart FromText(string text) => new("text", Text: text);
+
+    public static ChatContentPart FromImage(string imageUrl) => new("image_url", ImageUrl: new ChatImageUrl(imageUrl));
+}
+
+internal sealed record ChatImageUrl(
+    [property: JsonPropertyName("url")] string Url);
 
 internal sealed class ChatCompletionResponse
 {

@@ -53,14 +53,15 @@
                 }
             </nav>
 
-            <nav class="prompt-filter-row prompt-category-row" aria-label="提示词分类">
-                @foreach (var category in CategoryFilters)
-                {
-                    <button type="button" class="@CategoryClass(category)" @onclick="() => SetCategory(category)">
-                        @category
-                    </button>
-                }
-            </nav>
+            <label class="prompt-category-select">
+                <span>分类</span>
+                <select class="studio-select" value="@_categoryFilter" @onchange="UpdateCategory">
+                    @foreach (var category in CategoryFilters)
+                    {
+                        <option value="@category">@category</option>
+                    }
+                </select>
+            </label>
 
             <div class="prompt-library-meta">
                 <span>@Page.Total 条结果 · 第 @Page.Page / @PageCountLabel 页</span>
@@ -223,15 +224,14 @@
         await QueryPage(1);
     }
 
-    private async Task SetCategory(string category)
+    private string SourceClass(string source) => source == _sourceFilter ? "active" : string.Empty;
+    private string LanguageClass(PromptLibraryLanguage language) => language == _language ? "active" : string.Empty;
+
+    private async Task UpdateCategory(ChangeEventArgs args)
     {
-        _categoryFilter = category;
+        _categoryFilter = args.Value?.ToString() ?? AllFilter;
         await QueryPage(1);
     }
-
-    private string SourceClass(string source) => source == _sourceFilter ? "active" : string.Empty;
-    private string CategoryClass(string category) => category == _categoryFilter ? "active" : string.Empty;
-    private string LanguageClass(PromptLibraryLanguage language) => language == _language ? "active" : string.Empty;
 
     private async Task SetLanguage(PromptLibraryLanguage language)
     {
