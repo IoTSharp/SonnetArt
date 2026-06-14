@@ -210,14 +210,12 @@ public static class PromptLibraryEndpoints
         {
             using var connection = OpenConnection(promptLibraryPath);
             using var command = CreateCommand(connection, query);
-            command.Parameters.AddWithValue("@offset", offset);
-            command.Parameters.AddWithValue("@count", count);
             command.CommandText = $"""
                 {SelectItemColumns()}
                 FROM input
                 {BuildWhereClause(query)}
                 {SortClause()}
-                LIMIT @offset, @count
+                LIMIT {offset.ToString(System.Globalization.CultureInfo.InvariantCulture)}, {count.ToString(System.Globalization.CultureInfo.InvariantCulture)}
                 """;
 
             return ReadItems(command);
@@ -358,8 +356,7 @@ public static class PromptLibraryEndpoints
         }
 
         private static string SelectItemColumns() => """
-            SELECT
-                id,
+            SELECT id,
                 titleZh,
                 titleEn,
                 source,
