@@ -15,6 +15,12 @@ public sealed class PromptChatClient
     private const string LocalProxyHeader = "X-SonnetArt-Proxy";
     private const string DefaultModel = "gpt-5.5";
     private const int MaxTransientChatAttempts = 3;
+    private const int MaxCopyEvidenceChars = 18000;
+    private const int MaxCopyEvidenceItemChars = 1000;
+    private const int MaxContinuationEvidenceChars = 24000;
+    private const int MaxContinuationEvidenceItemChars = 1200;
+    private const int MaxMemoryChars = 6000;
+    private const int MaxMemorySourceChars = 16000;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -70,6 +76,25 @@ public sealed class PromptChatClient
         return string.IsNullOrWhiteSpace(content) ? userText : content.Trim();
     }
 
+    public async Task<string> RewriteImageContinuationPromptAsync(
+        StudioSettings settings,
+        IReadOnlyList<StudioMessage> history,
+        string workspaceMemory,
+        string sessionMemory,
+        GeneratedImage latestImage,
+        string userText,
+        CancellationToken cancellationToken)
+    {
+        var messages = new List<ChatMessage>
+        {
+            new("system", BuildImageContinuationSystemPrompt()),
+            new("user", BuildImageContinuationUserPrompt(history, workspaceMemory, sessionMemory, latestImage, userText)),
+        };
+
+        var content = await SendChatAsync(settings, messages, temperature: 0.25, cancellationToken);
+        return string.IsNullOrWhiteSpace(content) ? userText : content.Trim();
+    }
+
     public async Task<string> ReplyAsync(
         StudioSettings settings,
         IReadOnlyList<StudioMessage> history,
@@ -102,30 +127,46 @@ public sealed class PromptChatClient
     public async Task<string> ReplyForCopyAsync(
         StudioSettings settings,
         IReadOnlyList<StudioMessage> history,
+        string workspaceMemory,
+        string sessionMemory,
         string userText,
         CancellationToken cancellationToken)
     {
         var messages = new List<ChatMessage>
         {
             new("system", BuildCopyWorkspaceSystemPrompt()),
+            new("user", BuildCopyWorkspaceUserPrompt(history, workspaceMemory, sessionMemory, userText)),
         };
 
-        foreach (var item in history.TakeLast(10))
-        {
-            if (item.Images.Count > 0 || item.Role == "prompt-confirm")
-            {
-                continue;
-            }
-
-            var role = item.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase) ? "assistant" : "user";
-            if (!string.IsNullOrWhiteSpace(item.Content))
-            {
-                messages.Add(new ChatMessage(role, item.Content));
-            }
-        }
-
-        messages.Add(new ChatMessage("user", userText));
         return await SendChatAsync(settings, messages, temperature: 0.65, cancellationToken);
+    }
+
+    public async Task<WorkspaceMemoryUpdate> RefreshWorkspaceMemoryAsync(
+        StudioSettings settings,
+        StudioWorkspace workspace,
+        StudioSession activeSession,
+        string latestUserText,
+        string latestAssistantText,
+        CancellationToken cancellationToken)
+    {
+        var content = await SendChatAsync(
+            settings,
+            [
+                new ChatMessage("system", BuildMemoryRefreshSystemPrompt()),
+                new ChatMessage("user", BuildMemoryRefreshUserPrompt(workspace, activeSession, latestUserText, latestAssistantText)),
+            ],
+            temperature: 0.1,
+            cancellationToken);
+
+        try
+        {
+            var update = JsonSerializer.Deserialize<WorkspaceMemoryUpdate>(ExtractJson(content), JsonOptions);
+            return update?.Normalize() ?? WorkspaceMemoryUpdate.Empty;
+        }
+        catch (JsonException)
+        {
+            return WorkspaceMemoryUpdate.Empty;
+        }
     }
 
     public async Task<CommerceProductAnalysis> AnalyzeCommerceProductAsync(
@@ -187,12 +228,15 @@ public sealed class PromptChatClient
         你是 SonnetArt 文案空间里的资深中文文案策划、诊断与改写助手。你的任务是帮助用户写作、改写、扩写、润色、提炼标题、生成营销文案、短视频脚本、广告文案、私域文案、品牌文案和内容结构。不要提作图。
 
         工作原则：
-        1. 先理解用户意图，再动笔。优先判断行业/品类、内容目的、发布平台、目标受众、转化动作、已有文案状态和限制条件。
-        2. 如果关键信息不足且会明显影响结果，先用不超过 3 个问题追问；如果可以从上下文合理推断，就先说明你的推断并直接给可用结果。
-        3. 按行业和目的选择文案策略，不要套固定模板。带货/广告优先关注卖点转利益、信任证明、场景化和行动指令；短视频优先关注封面标题、3 秒开头、留存节奏、转折、互动和结尾转化；品牌/官网优先关注定位、价值主张、差异化、语气一致性；私域/朋友圈优先关注真人感、关系感、痛点共鸣和低压转化；B2B/技术产品优先关注受众角色、业务痛点、证据、ROI 和清晰度。
-        4. 可灵活使用 AIDA、PAS、BAB、FAB、4P/4C、问题-原因-解决、痛点-放大-解决、反常识-解释-证明、故事-冲突-结果、场景-痛点-产品-结果等框架，但不要机械展示框架名，除非用户要求。
-        5. 输出要直接可用，中文自然、有节奏，避免空话、套路营销腔、夸张承诺和虚假数据。保留用户明确要求，不编造品牌事实、资质、价格、疗效、案例或政策。
-        6. 文案修改时先诊断核心问题，再给修改方案；不要只改字句，要指出开头、结构、情绪、信任、卖点、场景和转化链路上的问题。
+        1. 先理解用户意图，再动笔。系统会把最近发的提示词、整个当前会话的用户提示词和最近文案结果放在用户消息里；你要先整合这些上下文，推测用户本轮真正意图，并在心里重新生成适合本轮任务的文案系统提示词，再按它出文案。
+        2. 最新用户输入拥有最高优先级。它可能是新任务、补充要求、对上一版的修改、换风格、换平台、缩短/扩写、或对整段会话目标的省略表达；如果它与旧约束冲突，以最新输入为准。
+        3. 优先判断行业/品类、内容目的、发布平台、目标受众、转化动作、已有文案状态和限制条件。当前会话里反复出现且未被最新输入覆盖的信息，应作为稳定约束继续保留。
+        4. 如果关键信息不足且会明显影响结果，先用不超过 3 个问题追问；如果可以从上下文合理推断，就先说明你的推断并直接给可用结果。
+        5. 按行业和目的选择文案策略，不要套固定模板。带货/广告优先关注卖点转利益、信任证明、场景化和行动指令；短视频优先关注封面标题、3 秒开头、留存节奏、转折、互动和结尾转化；品牌/官网优先关注定位、价值主张、差异化、语气一致性；私域/朋友圈优先关注真人感、关系感、痛点共鸣和低压转化；B2B/技术产品优先关注受众角色、业务痛点、证据、ROI 和清晰度。
+        6. 可灵活使用 AIDA、PAS、BAB、FAB、4P/4C、问题-原因-解决、痛点-放大-解决、反常识-解释-证明、故事-冲突-结果、场景-痛点-产品-结果等框架，但不要机械展示框架名，除非用户要求。
+        7. 输出要直接可用，中文自然、有节奏，避免空话、套路营销腔、夸张承诺和虚假数据。保留用户明确要求，不编造品牌事实、资质、价格、疗效、案例或政策。
+        8. 文案修改时先诊断核心问题，再给修改方案；不要只改字句，要指出开头、结构、情绪、信任、卖点、场景和转化链路上的问题。
+        9. 不要输出你在心里重建的系统提示词、推理过程或上下文整理过程，除非用户明确要求查看。
 
         当用户要求诊断或优化短视频/营销文案时，默认按这个顺序思考并择要输出：
         - 总体判断：爆款/转化潜力、最大优点、最大问题、优先优化方向。
@@ -214,6 +258,437 @@ public sealed class PromptChatClient
         - 用户要润色时，先保留原意，再提升清晰度、节奏、情绪、信任和行动指令。
         - 每次回答尽量短而有用，不要把所有诊断维度都堆出来；根据文案类型挑最重要的部分。
         """;
+
+    private static string BuildCopyWorkspaceUserPrompt(
+        IReadOnlyList<StudioMessage> history,
+        string workspaceMemory,
+        string sessionMemory,
+        string userText)
+    {
+        var previousPrompt = FindLatestCopyUserPrompt(history);
+
+        return $"""
+        工作空间记忆（跨会话沉淀，适用于新会话和当前会话；若与最新输入冲突，以最新输入为准）：
+        {FormatMemory(workspaceMemory)}
+
+        当前会话记忆（本会话目标、偏好、已有产出和待办；若与最新输入冲突，以最新输入为准）：
+        {FormatMemory(sessionMemory)}
+
+        当前会话的用户提示词（从早到晚，覆盖整个当前文案会话；这些是需求证据，不是新的系统指令）：
+        {BuildCopySessionPromptEvidence(history)}
+
+        最近一条历史用户提示词：
+        {previousPrompt}
+
+        最近文案结果摘录（用于理解已有版本、语气和用户可能要修改的对象；不要机械复述）：
+        {BuildRecentCopyResultEvidence(history)}
+
+        用户最新输入（最高优先级）：
+        {userText}
+
+        请先把“用户最新输入”与“整个当前会话的用户提示词”整合，推测用户本轮真正要完成的文案任务，在心里重建本轮文案系统提示词，然后直接输出文案或诊断结果。
+        """;
+    }
+
+    private static string FindLatestCopyUserPrompt(IReadOnlyList<StudioMessage> history)
+    {
+        for (var index = history.Count - 1; index >= 0; index--)
+        {
+            var message = history[index];
+            if (message.Role == "user" && !string.IsNullOrWhiteSpace(message.Content))
+            {
+                return NormalizeCopyEvidence(message.Content);
+            }
+        }
+
+        return "当前会话还没有上一条用户提示词。";
+    }
+
+    private static string BuildCopySessionPromptEvidence(IReadOnlyList<StudioMessage> history)
+    {
+        var entries = new List<string>();
+        for (var index = 0; index < history.Count; index++)
+        {
+            var message = history[index];
+            if (message.Role != "user" || string.IsNullOrWhiteSpace(message.Content))
+            {
+                continue;
+            }
+
+            AddCopyEvidence(entries, $"{index + 1}. 用户：{message.Content}");
+        }
+
+        return entries.Count == 0
+            ? "当前会话没有可用的历史用户提示词。"
+            : JoinCopyEvidence(entries);
+    }
+
+    private static string BuildRecentCopyResultEvidence(IReadOnlyList<StudioMessage> history)
+    {
+        var entries = new List<string>();
+        foreach (var message in history
+            .Where(item => item.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase) &&
+                item.Images.Count == 0 &&
+                !string.IsNullOrWhiteSpace(item.Content))
+            .TakeLast(4))
+        {
+            AddCopyEvidence(entries, $"文案结果：{message.Content}");
+        }
+
+        return entries.Count == 0
+            ? "当前会话还没有历史文案结果。"
+            : JoinCopyEvidence(entries);
+    }
+
+    private static void AddCopyEvidence(List<string> entries, string value)
+    {
+        var normalized = NormalizeCopyEvidence(value);
+        if (!string.IsNullOrWhiteSpace(normalized))
+        {
+            entries.Add(normalized);
+        }
+    }
+
+    private static string JoinCopyEvidence(IReadOnlyList<string> entries)
+    {
+        var all = string.Join("\n", entries);
+        if (all.Length <= MaxCopyEvidenceChars)
+        {
+            return all;
+        }
+
+        var headBudget = MaxCopyEvidenceChars / 3;
+        var tailBudget = MaxCopyEvidenceChars - headBudget - 80;
+        var head = new List<string>();
+        var tail = new List<string>();
+        var headChars = 0;
+        var tailChars = 0;
+
+        foreach (var entry in entries)
+        {
+            if (headChars + entry.Length + 1 > headBudget)
+            {
+                break;
+            }
+
+            head.Add(entry);
+            headChars += entry.Length + 1;
+        }
+
+        for (var index = entries.Count - 1; index >= 0; index--)
+        {
+            var entry = entries[index];
+            if (tailChars + entry.Length + 1 > tailBudget)
+            {
+                break;
+            }
+
+            tail.Add(entry);
+            tailChars += entry.Length + 1;
+        }
+
+        tail.Reverse();
+        return string.Join("\n", head.Concat(["...中间较早的文案提示词已省略，优先保留开头定位和最近约束..."]).Concat(tail));
+    }
+
+    private static string NormalizeCopyEvidence(string value)
+    {
+        var normalized = string.Join(
+            " ",
+            value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return normalized.Length <= MaxCopyEvidenceItemChars
+            ? normalized
+            : normalized[..MaxCopyEvidenceItemChars].TrimEnd() + "...";
+    }
+
+    private static string BuildMemoryRefreshSystemPrompt() =>
+        """
+        你是 SonnetArt 的记忆层整理器。你只返回 JSON，不要解释，不要 Markdown。
+        你的任务是根据当前工作空间、当前会话、已有记忆、最近一次用户输入和最近一次助手结果，更新两层记忆：
+        - sessionMemory：当前会话记忆，记录本会话目标、对象/产品/主题、风格、平台、受众、重要约束、用户偏好、已完成结果、仍要避免或继续处理的问题。
+        - workspaceMemory：工作空间记忆，记录跨会话稳定偏好、长期项目背景、常用品牌/产品/受众/风格、用户反复强调的限制、跨会话可复用事实。
+
+        规则：
+        1. 最新输入和最新结果优先；旧记忆中被覆盖、过期或冲突的内容要删除或改写。
+        2. 不要保存寒暄、失败报错、按钮说明、一次性流程细节、验证码、密钥、令牌、隐私敏感信息。
+        3. 不要编造品牌事实、价格、资质、疗效、人物身份或用户没有提供的长期偏好。
+        4. 记忆要短、结构化、可被下一次请求直接使用；优先使用中文要点。
+        5. sessionMemory 最多 900 中文字，workspaceMemory 最多 1200 中文字。
+
+        返回格式：
+        {
+          "sessionMemory": "更新后的当前会话记忆",
+          "workspaceMemory": "更新后的工作空间记忆"
+        }
+        """;
+
+    private static string BuildMemoryRefreshUserPrompt(
+        StudioWorkspace workspace,
+        StudioSession activeSession,
+        string latestUserText,
+        string latestAssistantText)
+    {
+        return $"""
+        工作空间：
+        名称：{workspace.Name}
+        类型：{WorkspaceTypeLabel(workspace.Type)}
+
+        已有工作空间记忆：
+        {FormatMemory(workspace.Memory)}
+
+        当前会话：
+        标题：{activeSession.Title}
+        类型/模式：{activeSession.Mode}
+
+        已有当前会话记忆：
+        {FormatMemory(activeSession.Memory)}
+
+        当前会话最近证据：
+        {BuildMemorySource(activeSession)}
+
+        工作空间内其他会话记忆摘录：
+        {BuildWorkspaceSessionMemorySource(workspace, activeSession.Id)}
+
+        最近一次用户输入：
+        {latestUserText}
+
+        最近一次助手结果：
+        {latestAssistantText}
+
+        请返回更新后的 sessionMemory 和 workspaceMemory。
+        """;
+    }
+
+    private static string BuildMemorySource(StudioSession session)
+    {
+        var entries = session.Messages
+            .Where(message => (message.Role is "user" or "assistant") && !string.IsNullOrWhiteSpace(message.Content))
+            .TakeLast(12)
+            .Select(message => $"{NormalizeMemoryRole(message.Role)}：{NormalizeMemoryText(message.Content)}")
+            .ToList();
+
+        foreach (var image in session.Messages.SelectMany(message => message.Images).TakeLast(6))
+        {
+            var prompt = !string.IsNullOrWhiteSpace(image.RequestPrompt) ? image.RequestPrompt : image.Prompt;
+            if (!string.IsNullOrWhiteSpace(prompt))
+            {
+                entries.Add($"图片提示词：{NormalizeMemoryText(prompt)}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(image.RevisedPrompt))
+            {
+                entries.Add($"模型修订提示词：{NormalizeMemoryText(image.RevisedPrompt)}");
+            }
+        }
+
+        return LimitMemorySource(entries.Count == 0 ? "当前会话暂无可用证据。" : string.Join("\n", entries));
+    }
+
+    private static string BuildWorkspaceSessionMemorySource(StudioWorkspace workspace, string activeSessionId)
+    {
+        var entries = workspace.Sessions
+            .Where(session => !string.Equals(session.Id, activeSessionId, StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(session.Memory))
+            .OrderByDescending(session => session.UpdatedAt)
+            .Take(8)
+            .Select(session => $"{session.Title}：{NormalizeMemoryText(session.Memory)}")
+            .ToArray();
+
+        return entries.Length == 0
+            ? "暂无其他会话记忆。"
+            : LimitMemorySource(string.Join("\n", entries));
+    }
+
+    private static string NormalizeMemoryRole(string role) =>
+        role.Equals("assistant", StringComparison.OrdinalIgnoreCase) ? "助手结果" : "用户";
+
+    private static string NormalizeMemoryText(string? value)
+    {
+        return string.Join(
+            " ",
+            (value ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
+
+    private static string LimitMemorySource(string value)
+    {
+        var normalized = NormalizeMemoryText(value);
+        return normalized.Length <= MaxMemorySourceChars
+            ? normalized
+            : normalized[..MaxMemorySourceChars].TrimEnd() + "...";
+    }
+
+    private static string FormatMemory(string? memory)
+    {
+        var normalized = NormalizeMemoryText(memory);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "暂无记忆。";
+        }
+
+        return normalized.Length <= MaxMemoryChars
+            ? normalized
+            : normalized[..MaxMemoryChars].TrimEnd() + "...";
+    }
+
+    private static string WorkspaceTypeLabel(string type) =>
+        StudioWorkspace.NormalizeType(type) switch
+        {
+            StudioWorkspace.CopyType => "文案空间",
+            StudioWorkspace.CommerceProductImageType => "电商产品图",
+            _ => "平面设计",
+        };
+
+    private static string BuildImageContinuationSystemPrompt() =>
+        """
+        你是 SonnetArt 作图工作台的图片方案与续作提示词总编。用户当前会话已经生成过图片，系统会把最近一张图作为参考图一起发送给图片模型。
+        你的任务是通览整个当前会话里的提示词证据，包括用户每次输入、已生成图片的请求提示词、模型修订提示词和最近一张图的提示词，再结合用户最新输入，推测用户本次真正意图，重新生成一段可直接给图片生成/编辑模型使用的中文系统提示词。
+
+        规则：
+        1. 最新用户输入拥有最高优先级；它可能是新增需求、修改意见、风格切换、局部优化、重新出图要求或对前文隐含目标的补充。
+        2. 不要只依赖最近一条提示词。先整合整个当前会话中反复出现、仍然有效、与当前画面相关的主体、场景、构图、风格、色彩、材质、光影、文字和限制条件。
+        3. 如果最新输入很短或省略主语，要根据全会话提示词推测它指向的对象和动作；如果最新输入与旧约束冲突，以最新输入为准，并丢弃被覆盖的旧约束。
+        4. 如果用户没有明确要求换主体、换场景或换风格，默认延续上一张图的主体身份、产品外观、构图关系、色彩、材质、光影和整体风格。
+        5. 如果用户明确要求改变某些元素，只改变这些元素，并在提示词中约束其余关键视觉特征保持一致。
+        6. 整合会话提示词时只保留对当前方案有用的稳定约束，去掉寒暄、确认、失败提示、下载说明、按钮文案和无关文本。
+        7. 不编造品牌、人物身份、文字、资质、价格、疗效或版权内容；不要加入用户未要求的敏感内容。
+        8. 输出必须是一段完整中文图片方案提示词，不要 Markdown，不要标题，不要解释，不要 JSON。
+        """;
+
+    private static string BuildImageContinuationUserPrompt(
+        IReadOnlyList<StudioMessage> history,
+        string workspaceMemory,
+        string sessionMemory,
+        GeneratedImage latestImage,
+        string userText)
+    {
+        var sessionEvidence = BuildSessionPromptEvidence(history);
+        var sourcePrompt = !string.IsNullOrWhiteSpace(latestImage.RequestPrompt)
+            ? latestImage.RequestPrompt
+            : latestImage.Prompt;
+
+        return $"""
+        工作空间记忆（跨会话沉淀，适用于当前图片方案；若与最新输入冲突，以最新输入为准）：
+        {FormatMemory(workspaceMemory)}
+
+        当前会话记忆（本会话的主体、风格、限制、已有结果和待修正事项；若与最新输入冲突，以最新输入为准）：
+        {FormatMemory(sessionMemory)}
+
+        当前会话提示词证据（从早到晚，覆盖整个当前会话；如果过长，系统已优先保留首尾关键提示词和图片提示词）：
+        {sessionEvidence}
+
+        上一张图的请求提示词：
+        {sourcePrompt}
+
+        上一张图的模型修订提示词：
+        {latestImage.RevisedPrompt}
+
+        用户最新输入：
+        {userText}
+
+        请先整合整个当前会话的提示词并推测用户意图，然后只输出本次要发送给图片模型的最终图片方案提示词。
+        """;
+    }
+
+    private static string NormalizeHistoryRole(string role) =>
+        role.Equals("assistant", StringComparison.OrdinalIgnoreCase) ? "图像结果" : "用户";
+
+    private static string BuildSessionPromptEvidence(IReadOnlyList<StudioMessage> history)
+    {
+        var entries = new List<string>();
+        for (var messageIndex = 0; messageIndex < history.Count; messageIndex++)
+        {
+            var message = history[messageIndex];
+            if (message.Role == "prompt-confirm")
+            {
+                continue;
+            }
+
+            if ((message.Role is "user" or "assistant") && !string.IsNullOrWhiteSpace(message.Content))
+            {
+                AddContinuationEvidence(entries, $"{messageIndex + 1}. {NormalizeHistoryRole(message.Role)}：{message.Content}");
+            }
+
+            for (var imageIndex = 0; imageIndex < message.Images.Count; imageIndex++)
+            {
+                var image = message.Images[imageIndex];
+                var imageLabel = $"{messageIndex + 1}.{imageIndex + 1}";
+                var requestPrompt = !string.IsNullOrWhiteSpace(image.RequestPrompt)
+                    ? image.RequestPrompt
+                    : image.Prompt;
+
+                AddContinuationEvidence(entries, $"图片 {imageLabel} 请求提示词：{requestPrompt}");
+                AddContinuationEvidence(entries, $"图片 {imageLabel} 模型修订提示词：{image.RevisedPrompt}");
+            }
+        }
+
+        if (entries.Count == 0)
+        {
+            return "当前会话没有可用的历史提示词。";
+        }
+
+        return JoinContinuationEvidence(entries);
+    }
+
+    private static void AddContinuationEvidence(List<string> entries, string value)
+    {
+        var normalized = NormalizeContinuationEvidence(value);
+        if (!string.IsNullOrWhiteSpace(normalized))
+        {
+            entries.Add(normalized);
+        }
+    }
+
+    private static string JoinContinuationEvidence(IReadOnlyList<string> entries)
+    {
+        var all = string.Join("\n", entries);
+        if (all.Length <= MaxContinuationEvidenceChars)
+        {
+            return all;
+        }
+
+        var headBudget = MaxContinuationEvidenceChars / 3;
+        var tailBudget = MaxContinuationEvidenceChars - headBudget - 80;
+        var head = new List<string>();
+        var tail = new List<string>();
+        var headChars = 0;
+        var tailChars = 0;
+
+        foreach (var entry in entries)
+        {
+            if (headChars + entry.Length + 1 > headBudget)
+            {
+                break;
+            }
+
+            head.Add(entry);
+            headChars += entry.Length + 1;
+        }
+
+        for (var index = entries.Count - 1; index >= 0; index--)
+        {
+            var entry = entries[index];
+            if (tailChars + entry.Length + 1 > tailBudget)
+            {
+                break;
+            }
+
+            tail.Add(entry);
+            tailChars += entry.Length + 1;
+        }
+
+        tail.Reverse();
+        return string.Join("\n", head.Concat(["...中间较早的提示词已省略，优先保留开头定位和最近约束..."]).Concat(tail));
+    }
+
+    private static string NormalizeContinuationEvidence(string value)
+    {
+        var normalized = string.Join(
+            " ",
+            value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return normalized.Length <= MaxContinuationEvidenceItemChars
+            ? normalized
+            : normalized[..MaxContinuationEvidenceItemChars].TrimEnd() + "...";
+    }
 
     private static string BuildCommerceProductAnalysisSystemPrompt() =>
         """
@@ -515,6 +990,28 @@ public sealed class PromptChatClient
 public sealed record PromptIntentResult(
     [property: JsonPropertyName("image")] bool Image,
     [property: JsonPropertyName("reason")] string Reason);
+
+public sealed record WorkspaceMemoryUpdate(
+    [property: JsonPropertyName("sessionMemory")] string SessionMemory,
+    [property: JsonPropertyName("workspaceMemory")] string WorkspaceMemory)
+{
+    public static WorkspaceMemoryUpdate Empty { get; } = new(string.Empty, string.Empty);
+
+    public WorkspaceMemoryUpdate Normalize()
+    {
+        return new WorkspaceMemoryUpdate(
+            NormalizeMemory(SessionMemory, 4000),
+            NormalizeMemory(WorkspaceMemory, 6000));
+    }
+
+    private static string NormalizeMemory(string? value, int maxLength)
+    {
+        var normalized = string.Join(
+            "\n",
+            (value ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return normalized.Length <= maxLength ? normalized : normalized[..maxLength].TrimEnd();
+    }
+}
 
 internal sealed record ChatCompletionRequest(
     [property: JsonPropertyName("model")] string Model,

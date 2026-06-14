@@ -1017,8 +1017,9 @@ public partial class Home
             var referenceFiles = _referenceFiles.ToArray();
             var maskReference = ActiveSession.MaskReference;
             var stopwatch = Stopwatch.StartNew();
+            var modelPrompt = BuildPromptWithMemory(prompt);
             var result = await ImageClient.GenerateAsync(
-                new StudioImageRequest(requestSettings, prompt, references, maskReference, referenceFiles, _count, requestMode),
+                new StudioImageRequest(requestSettings, modelPrompt, references, maskReference, referenceFiles, _count, requestMode),
                 _cts.Token);
             stopwatch.Stop();
 
@@ -1064,6 +1065,7 @@ public partial class Home
         finally
         {
             _loading = false;
+            await RefreshActiveMemoryAsync(prompt);
             if (completed)
             {
                 ClearSenderAttachments();
@@ -1143,6 +1145,33 @@ public partial class Home
                 : await ChatClient.AnalyzeIntentAsync(Settings, text, _cts.Token);
             if (intent.Image)
             {
+                if (!HasImageInputs() && TryGetLatestGeneratedImage(out var latestImage))
+                {
+                    _loadingLabel = "正在整合当前会话提示词";
+                    StateHasChanged();
+
+                    var rewrittenPrompt = await ChatClient.RewriteImageContinuationPromptAsync(
+                        Settings,
+                        ActiveSession.Messages.SkipLast(1).ToArray(),
+                        ActiveWorkspace.Memory,
+                        ActiveSession.Memory,
+                        latestImage,
+                        text,
+                        _cts.Token);
+                    rewrittenPrompt = string.IsNullOrWhiteSpace(rewrittenPrompt) ? text : rewrittenPrompt.Trim();
+
+                    var userContent = BuildImageContinuationUserMessageContent(text);
+                    if (ActiveSession.Messages.LastOrDefault() is { Role: "user" } lastUserMessage)
+                    {
+                        lastUserMessage.Content = userContent;
+                    }
+
+                    ActiveSession.Prompt = rewrittenPrompt;
+                    _loading = false;
+                    await GenerateImageContinuationAsync(latestImage, rewrittenPrompt, userContent);
+                    return;
+                }
+
                 ActiveSession.Prompt = text;
                 var polishMode = StudioSettings.NormalizePromptPolishMode(Settings.PromptPolishMode);
                 if (polishMode == "auto")
@@ -1200,6 +1229,7 @@ public partial class Home
         {
             _loading = false;
             _loadingLabel = "正在请求图像接口";
+            await RefreshActiveMemoryAsync(text);
             TouchActiveSession();
             await SaveAsync();
             StateHasChanged();
@@ -1300,7 +1330,13 @@ public partial class Home
 
         try
         {
-            var reply = await ChatClient.ReplyForCopyAsync(Settings, ActiveSession.Messages.SkipLast(1).ToArray(), text, _cts.Token);
+            var reply = await ChatClient.ReplyForCopyAsync(
+                Settings,
+                ActiveSession.Messages.SkipLast(1).ToArray(),
+                ActiveWorkspace.Memory,
+                ActiveSession.Memory,
+                text,
+                _cts.Token);
             ActiveSession.Messages.Add(new StudioMessage
             {
                 Role = "assistant",
@@ -1328,6 +1364,7 @@ public partial class Home
         {
             _loading = false;
             _loadingLabel = "正在请求图像接口";
+            await RefreshActiveMemoryAsync(text);
             TouchActiveSession();
             await SaveAsync();
             StateHasChanged();
@@ -1638,6 +1675,44 @@ public partial class Home
             {
                 ActiveSession.ImageReferences = string.Empty;
                 ActiveSession.MaskReference = string.Empty;
+                ApplyResolvedMode("generate");
+                TouchActiveSession();
+                await SaveAsync();
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task GenerateImageContinuationAsync(GeneratedImage sourceImage, string prompt, string userContent)
+    {
+        if (string.IsNullOrWhiteSpace(sourceImage.Url) || string.IsNullOrWhiteSpace(prompt) || _loading)
+        {
+            return;
+        }
+
+        ClearAllReferenceInputs();
+        ActiveSession.ImageReferences = sourceImage.Url;
+        ActiveSession.MaskReference = string.Empty;
+        ActiveSession.ReferenceRole = "content";
+        ActiveSession.Prompt = prompt;
+        var continuationMode = ResolveRequestMode(prompt, ActiveSession.Mode);
+        ApplyResolvedMode(continuationMode);
+        _senderText = string.Empty;
+        TouchActiveSession(userContent);
+        StateHasChanged();
+        await SaveAsync();
+
+        try
+        {
+            await GenerateAsync(prompt, addUserMessage: false);
+        }
+        finally
+        {
+            if (string.Equals(ActiveSession.ImageReferences, sourceImage.Url, StringComparison.Ordinal) &&
+                string.IsNullOrWhiteSpace(ActiveSession.MaskReference))
+            {
+                ActiveSession.ImageReferences = string.Empty;
+                ActiveSession.ReferenceRole = "auto";
                 ApplyResolvedMode("generate");
                 TouchActiveSession();
                 await SaveAsync();
@@ -1999,12 +2074,84 @@ public partial class Home
         return url;
     }
 
+    private string BuildPromptWithMemory(string prompt)
+    {
+        var workspaceMemory = ActiveWorkspace.Memory?.Trim();
+        var sessionMemory = ActiveSession.Memory?.Trim();
+        if (string.IsNullOrWhiteSpace(workspaceMemory) && string.IsNullOrWhiteSpace(sessionMemory))
+        {
+            return prompt;
+        }
+
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(workspaceMemory))
+        {
+            parts.Add($"工作空间记忆：{workspaceMemory}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(sessionMemory))
+        {
+            parts.Add($"当前会话记忆：{sessionMemory}");
+        }
+
+        parts.Add($"用户本次提示词：{prompt}");
+        parts.Add("请综合记忆和本次提示词生成结果；若记忆与本次提示词冲突，以本次提示词为最高优先级。");
+        return string.Join("\n\n", parts);
+    }
+
+    private async Task RefreshActiveMemoryAsync(string latestUserText)
+    {
+        if (!ChatReady)
+        {
+            return;
+        }
+
+        var workspace = ActiveWorkspace;
+        var session = ActiveSession;
+        var latestAssistantText = session.Messages
+            .LastOrDefault(message => message.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase) ||
+                message.Role.Equals("system", StringComparison.OrdinalIgnoreCase))
+            ?.Content ?? string.Empty;
+
+        try
+        {
+            var update = await ChatClient.RefreshWorkspaceMemoryAsync(
+                Settings,
+                workspace,
+                session,
+                latestUserText,
+                latestAssistantText,
+                _cts?.Token ?? CancellationToken.None);
+            var now = DateTimeOffset.Now;
+            if (!string.IsNullOrWhiteSpace(update.SessionMemory))
+            {
+                session.Memory = update.SessionMemory;
+                session.MemoryUpdatedAt = now;
+            }
+
+            if (!string.IsNullOrWhiteSpace(update.WorkspaceMemory))
+            {
+                workspace.Memory = update.WorkspaceMemory;
+                workspace.MemoryUpdatedAt = now;
+            }
+        }
+        catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
+        {
+        }
+        catch
+        {
+            // Memory refresh should never block the main generation or copywriting result.
+        }
+    }
+
     private async Task NewSession()
     {
         var workspace = ActiveWorkspace;
         var session = new StudioSession
         {
             Title = $"{StudioWorkspace.CreateDefaultSession(workspace.Type).Title} {workspace.Sessions.Count + 1}",
+            Memory = workspace.Memory,
+            MemoryUpdatedAt = string.IsNullOrWhiteSpace(workspace.Memory) ? null : DateTimeOffset.Now,
         };
         workspace.Sessions.Insert(0, session);
         workspace.ActiveSessionId = session.Id;
@@ -2069,6 +2216,8 @@ public partial class Home
         var session = StudioWorkspace.CreateDefaultSession(workspace.Type);
         workspace.Sessions = [session];
         workspace.ActiveSessionId = session.Id;
+        workspace.Memory = string.Empty;
+        workspace.MemoryUpdatedAt = null;
         TouchWorkspace(workspace);
         _pendingPrompt = null;
         ClearDownloadNotice();
@@ -2087,10 +2236,14 @@ public partial class Home
         else if (IsCopyWorkspace)
         {
             ActiveSession.Messages.Clear();
+            ActiveSession.Memory = ActiveWorkspace.Memory;
+            ActiveSession.MemoryUpdatedAt = string.IsNullOrWhiteSpace(ActiveSession.Memory) ? null : DateTimeOffset.Now;
         }
         else
         {
             ActiveSession.Messages.RemoveAll(message => message.Images.Count > 0);
+            ActiveSession.Memory = ActiveWorkspace.Memory;
+            ActiveSession.MemoryUpdatedAt = string.IsNullOrWhiteSpace(ActiveSession.Memory) ? null : DateTimeOffset.Now;
         }
 
         ClearDownloadNotice();
@@ -2941,6 +3094,31 @@ public partial class Home
         return HasImageInputs()
             ? $"{content}\n\n已添加 {inputCount} 张图片附件，模式：{ModeName(requestMode)}。"
             : content;
+    }
+
+    private static string BuildImageContinuationUserMessageContent(string text)
+    {
+        var content = string.IsNullOrWhiteSpace(text) ? "参考上一张图继续生成" : text.Trim();
+        return $"{content}\n\n已自动结合当前会话提示词，并附着上一张图作为参考。";
+    }
+
+    private bool TryGetLatestGeneratedImage(out GeneratedImage image)
+    {
+        foreach (var message in ActiveSession.Messages.AsEnumerable().Reverse())
+        {
+            for (var index = message.Images.Count - 1; index >= 0; index--)
+            {
+                var candidate = message.Images[index];
+                if (!string.IsNullOrWhiteSpace(candidate.Url))
+                {
+                    image = candidate;
+                    return true;
+                }
+            }
+        }
+
+        image = default!;
+        return false;
     }
 
     private StudioSettings CreateRequestSettings()

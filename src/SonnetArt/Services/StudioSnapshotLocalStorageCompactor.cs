@@ -13,6 +13,7 @@ internal static class StudioSnapshotLocalStorageCompactor
     private const int MaxPromptChars = 32_000;
     private const int MaxMessageChars = 8_000;
     private const int MaxMinimalMessageChars = 2_000;
+    private const int MaxMemoryChars = 8_000;
     private const int MaxReferenceChars = 4_096;
     private const int MaxEmbeddedReferenceChars = 1_000_000;
     private const int MaxAdvancedJsonChars = 64_000;
@@ -87,6 +88,8 @@ internal static class StudioSnapshotLocalStorageCompactor
             CreatedAt = workspace.CreatedAt,
             UpdatedAt = workspace.UpdatedAt,
             LastOpenedAt = workspace.LastOpenedAt,
+            Memory = LimitText(workspace.Memory, MaxMemoryChars),
+            MemoryUpdatedAt = workspace.MemoryUpdatedAt,
             Sessions = sessions,
             ActiveSessionId = sessions.FirstOrDefault(session =>
                 string.Equals(session.Id, workspace.ActiveSessionId, StringComparison.Ordinal))?.Id ?? sessions.FirstOrDefault()?.Id,
@@ -281,6 +284,8 @@ internal static class StudioSnapshotLocalStorageCompactor
             Title = LimitText(session.Title, MaxTitleChars),
             CreatedAt = session.CreatedAt,
             UpdatedAt = session.UpdatedAt,
+            Memory = LimitText(session.Memory, MaxMemoryChars),
+            MemoryUpdatedAt = session.MemoryUpdatedAt,
             Mode = session.Mode,
             Prompt = LimitText(session.Prompt, MaxPromptChars),
             ImageReferences = LimitText(session.ImageReferences, MaxReferenceChars),

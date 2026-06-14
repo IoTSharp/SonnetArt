@@ -228,6 +228,8 @@ public sealed class StudioSession
     public string Title { get; set; } = "新建作图";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
+    public string Memory { get; set; } = string.Empty;
+    public DateTimeOffset? MemoryUpdatedAt { get; set; }
     public string Mode { get; set; } = "generate";
     public string Prompt { get; set; } = string.Empty;
     public string ImageReferences { get; set; } = string.Empty;
@@ -290,6 +292,8 @@ public sealed class StudioWorkspace
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset LastOpenedAt { get; set; } = DateTimeOffset.Now;
+    public string Memory { get; set; } = string.Empty;
+    public DateTimeOffset? MemoryUpdatedAt { get; set; }
     public List<StudioSession> Sessions { get; set; } = [];
     public string? ActiveSessionId { get; set; }
     public CommerceWorkspaceState CommerceWorkspace { get; set; } = new();
