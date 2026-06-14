@@ -108,6 +108,15 @@ public partial class Home
         new("character", "人物", "保持人物身份和脸部一致性"),
         new("product", "产品", "保持产品外观、比例和关键细节"),
     ];
+    private readonly IReadOnlyList<CommerceEmptyNode> _commerceEmptyNodes =
+    [
+        new("主图", "白底、浅灰或轻场景首图", "待规划"),
+        new("场景图", "健身房、户外、办公室或家居", "待规划"),
+        new("细节图", "材质、结构、容量和握持细节", "待规划"),
+        new("对比图", "卖点、效果或尺寸对比", "待规划"),
+        new("尺寸图", "规格、包装和容量说明", "待规划"),
+        new("A+ 图", "详情页模块和品牌故事", "待规划"),
+    ];
     private readonly IReadOnlyList<MatrixResolutionOption> _matrixResolutionOptions =
     [
         new("1k", "1K"),
@@ -225,7 +234,7 @@ public partial class Home
     private bool AccountReady => SonnetLoggedIn &&
         !string.IsNullOrWhiteSpace(Settings.ImageApiKey) &&
         !string.IsNullOrWhiteSpace(Settings.OpenAiApiKey);
-    private bool RequiresAuthOverlay => !(IsGraphicWorkspace ? AccountReady : ChatReady) && !_sonnetBusy;
+    private bool RequiresAuthOverlay => !IsCommerceWorkspace && !(IsGraphicWorkspace ? AccountReady : ChatReady) && !_sonnetBusy;
     private string EffectiveTheme => Settings.ThemeMode == "dark" || (Settings.ThemeMode == "system" && _systemPrefersDark)
         ? "dark"
         : "light";
@@ -257,14 +266,17 @@ public partial class Home
         ? ServerStatusText
         : $"{ServerStatusText} · {_serverStatusCheckedAt.Value.ToLocalTime():HH:mm:ss}";
     private string BodyClass =>
-        $"studio-body{(_leftSidebarCollapsed ? " left-collapsed" : string.Empty)}{(_rightPromptPanelCollapsed ? " right-collapsed" : string.Empty)}";
+        $"studio-body{(IsCommerceWorkspace ? " commerce-mode" : string.Empty)}{(_leftSidebarCollapsed ? " left-collapsed" : string.Empty)}{(!IsCommerceWorkspace && _rightPromptPanelCollapsed ? " right-collapsed" : string.Empty)}";
     private string SidebarClass => _leftSidebarCollapsed ? "studio-sidebar is-collapsed" : "studio-sidebar";
     private string PromptPanelClass => _rightPromptPanelCollapsed ? "prompt-sidebar is-collapsed" : "prompt-sidebar";
     private string CanvasClass => _loading ? "workspace-canvas is-loading" : "workspace-canvas";
     private bool IsGraphicWorkspace => ActiveWorkspace.Type == StudioWorkspace.GraphicType;
     private bool IsCopyWorkspace => ActiveWorkspace.Type == StudioWorkspace.CopyType;
+    private bool IsCommerceWorkspace => ActiveWorkspace.Type == StudioWorkspace.CommerceProductImageType;
+    private CommerceWorkspaceState CommerceWorkspace => ActiveWorkspace.CommerceWorkspace;
+    private bool CommerceHasProducts => CommerceWorkspace.Products.Count > 0;
     private string ActiveWorkspaceLabel => WorkspaceTypeLabel(ActiveWorkspace.Type);
-    private string ClearResultsText => IsGraphicWorkspace ? "清空结果" : "清空会话";
+    private string ClearResultsText => IsCommerceWorkspace ? "重置规划" : IsGraphicWorkspace ? "清空结果" : "清空会话";
     private string EmptyTitle => IsGraphicWorkspace ? "准备开始作图" : "准备开始写文案";
     private string EmptyDescription => IsGraphicWorkspace
         ? "在底部输入描述，生成结果会永久保存在当前会话。"
@@ -275,7 +287,11 @@ public partial class Home
     private int SenderMaxAttachments => IsGraphicWorkspace ? 16 : 0;
     private string SenderUploadText => IsGraphicWorkspace ? "添加图片" : string.Empty;
     private string SenderAttachmentsPlaceholder => IsGraphicWorkspace ? "选择、拖入或粘贴图片" : string.Empty;
-    private string WorkspaceStatus => IsCopyWorkspace
+    private string WorkspaceStatus => IsCommerceWorkspace
+        ? CommerceHasProducts
+            ? $"商品档案 {CommerceWorkspace.Products.Count} 个 · 图片方案 {CommerceWorkspace.ImagePlans.Count} 套"
+            : "等待导入商品信息，规划和结果会保存在当前工作区"
+        : IsCopyWorkspace
         ? _loading
             ? "正在生成文案，请保持窗口打开"
             : ActiveSession.Messages.Count == 0
@@ -310,7 +326,7 @@ public partial class Home
     private bool PaymentSucceeded => IsPaymentSuccess(_latestPaymentStatus?.Status);
     private bool PaymentExpired => RemainingPaymentSeconds <= 0 || IsPaymentExpired(_latestPaymentStatus?.Status);
     private bool HasPendingPaymentOrder => _activePaymentOrder is not null && !PaymentSucceeded && !PaymentExpired;
-    private string ModeLabel => IsCopyWorkspace ? "文案空间" : ActiveSession.Mode switch
+    private string ModeLabel => IsCommerceWorkspace ? "电商产品图" : IsCopyWorkspace ? "文案空间" : ActiveSession.Mode switch
     {
         "image" => "图生图",
         "edit" => "图片编辑",
@@ -889,13 +905,29 @@ public partial class Home
     private void ToggleLeftSidebarCollapsed() => _leftSidebarCollapsed = !_leftSidebarCollapsed;
     private void SetRightPromptPanelCollapsed(bool collapsed) => _rightPromptPanelCollapsed = collapsed;
     private static int WorkspaceSortOrder(string type) =>
-        StudioWorkspace.NormalizeType(type) == StudioWorkspace.CopyType ? 0 : 1;
+        StudioWorkspace.NormalizeType(type) switch
+        {
+            StudioWorkspace.CopyType => 0,
+            StudioWorkspace.GraphicType => 1,
+            StudioWorkspace.CommerceProductImageType => 2,
+            _ => 3,
+        };
 
     private static string WorkspaceIcon(string type) =>
-        StudioWorkspace.NormalizeType(type) == StudioWorkspace.CopyType ? "file-text" : "picture";
+        StudioWorkspace.NormalizeType(type) switch
+        {
+            StudioWorkspace.CopyType => "file-text",
+            StudioWorkspace.CommerceProductImageType => "shopping",
+            _ => "picture",
+        };
 
     private static string WorkspaceTypeLabel(string type) =>
-        StudioWorkspace.NormalizeType(type) == StudioWorkspace.CopyType ? "文案空间" : "平面设计";
+        StudioWorkspace.NormalizeType(type) switch
+        {
+            StudioWorkspace.CopyType => "文案空间",
+            StudioWorkspace.CommerceProductImageType => "电商产品图",
+            _ => "平面设计",
+        };
 
     private static string WorkspaceDescription(StudioWorkspace workspace)
     {
@@ -903,10 +935,12 @@ public partial class Home
     }
 
     private string SessionModeLabel(StudioSession session) =>
-        IsCopyWorkspace ? "文案" : ModeName(session.Mode);
+        IsCommerceWorkspace ? "规划" : IsCopyWorkspace ? "文案" : ModeName(session.Mode);
 
     private string ConversationIcon(StudioSession session) =>
-        IsCopyWorkspace
+        IsCommerceWorkspace
+            ? "shopping"
+            : IsCopyWorkspace
             ? "file-text"
             : session.Messages.Count > 0 ? "picture" : "message";
 
@@ -1962,7 +1996,7 @@ public partial class Home
         var workspace = ActiveWorkspace;
         var session = new StudioSession
         {
-            Title = $"{(workspace.Type == StudioWorkspace.CopyType ? "新建文案" : "新建作图")} {workspace.Sessions.Count + 1}",
+            Title = $"{StudioWorkspace.CreateDefaultSession(workspace.Type).Title} {workspace.Sessions.Count + 1}",
         };
         workspace.Sessions.Insert(0, session);
         workspace.ActiveSessionId = session.Id;
@@ -2036,7 +2070,13 @@ public partial class Home
 
     private async Task ClearResults()
     {
-        if (IsCopyWorkspace)
+        if (IsCommerceWorkspace)
+        {
+            CommerceWorkspace.ImagePlans.Clear();
+            CommerceWorkspace.ActiveImagePlanId = null;
+            CommerceWorkspace.UpdatedAt = DateTimeOffset.Now;
+        }
+        else if (IsCopyWorkspace)
         {
             ActiveSession.Messages.Clear();
         }
@@ -2048,6 +2088,7 @@ public partial class Home
         ClearDownloadNotice();
         CloseImagePreview();
         TouchActiveSession();
+        TouchWorkspace(ActiveWorkspace);
         await SaveAsync();
     }
 
@@ -2060,7 +2101,7 @@ public partial class Home
         ClearDownloadNotice();
         CloseImagePreview();
         ClearAllReferenceInputs();
-        TouchActiveSession(IsCopyWorkspace ? "新建文案" : "新建作图");
+        TouchActiveSession(StudioWorkspace.CreateDefaultSession(ActiveWorkspace.Type).Title);
     }
 
     private async Task SelectWorkspace(string workspaceId)
@@ -2072,7 +2113,7 @@ public partial class Home
         }
 
         ClearAllReferenceInputs();
-        if (workspace.Type == StudioWorkspace.CopyType)
+        if (workspace.Type != StudioWorkspace.GraphicType)
         {
             _galleryOpen = false;
             CloseImagePreview();
@@ -2093,7 +2134,7 @@ public partial class Home
             return;
         }
 
-        if (workspace.Type == StudioWorkspace.CopyType)
+        if (workspace.Type != StudioWorkspace.GraphicType)
         {
             _galleryOpen = false;
             ClearAllReferenceInputs();
@@ -2160,8 +2201,10 @@ public partial class Home
         var trimmed = name.Trim();
         return trimmed == StudioWorkspace.DefaultName(StudioWorkspace.GraphicType) ||
             trimmed == StudioWorkspace.DefaultName(StudioWorkspace.CopyType) ||
+            trimmed == StudioWorkspace.DefaultName(StudioWorkspace.CommerceProductImageType) ||
             trimmed.StartsWith($"{StudioWorkspace.DefaultName(StudioWorkspace.GraphicType)} ", StringComparison.Ordinal) ||
-            trimmed.StartsWith($"{StudioWorkspace.DefaultName(StudioWorkspace.CopyType)} ", StringComparison.Ordinal);
+            trimmed.StartsWith($"{StudioWorkspace.DefaultName(StudioWorkspace.CopyType)} ", StringComparison.Ordinal) ||
+            trimmed.StartsWith($"{StudioWorkspace.DefaultName(StudioWorkspace.CommerceProductImageType)} ", StringComparison.Ordinal);
     }
 
     private async Task UsePrompt(string prompt)
@@ -3458,6 +3501,7 @@ public partial class Home
     private sealed record ImageRevisionRequest(string ImageUrl, string Prompt);
     private sealed record PromptPolishOption(string Value, string Label, string Description);
     private sealed record ReferenceRoleOption(string Value, string Label, string Description);
+    private sealed record CommerceEmptyNode(string Title, string Description, string Status);
     private sealed record MatrixResolutionOption(string Tier, string Label);
     private sealed record ImageMatrixRun(string ResolutionTier, string Quality, string Size);
     private sealed record SenderImageAttachment(string Id, ImageReferenceFile ReferenceFile, XAttachmentItem Attachment);

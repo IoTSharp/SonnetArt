@@ -78,7 +78,107 @@
                 </section>
 
                 <section class="@CanvasClass">
-                    @if (IsGraphicWorkspace && _galleryOpen)
+                    @if (IsCommerceWorkspace)
+                    {
+                        <div class="commerce-workspace">
+                            <aside class="commerce-pane commerce-products-pane" aria-label="商品与批次">
+                                <header>
+                                    <div>
+                                        <span class="workspace-eyebrow">商品与批次</span>
+                                        <h3>商品档案</h3>
+                                    </div>
+                                    <button type="button" class="commerce-icon-button" title="新增商品" disabled>
+                                        <Icon Type="plus" Theme="IconThemeType.Outline" />
+                                    </button>
+                                </header>
+
+                                @if (!CommerceHasProducts)
+                                {
+                                    <div class="commerce-empty-block">
+                                        <Icon Type="inbox" Theme="IconThemeType.Outline" />
+                                        <strong>还没有商品</strong>
+                                        <span>下一步会在这里录入商品名称、描述、卖点、规格、SKU 和产品参考图。</span>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="commerce-product-list">
+                                        @foreach (var product in CommerceWorkspace.Products)
+                                        {
+                                            <button type="button" class="commerce-product-item">
+                                                <strong>@product.Name</strong>
+                                                <span>@(string.IsNullOrWhiteSpace(product.Description) ? "未填写描述" : product.Description)</span>
+                                            </button>
+                                        }
+                                    </div>
+                                }
+
+                                <div class="commerce-summary">
+                                    <span>批次</span>
+                                    <strong>0</strong>
+                                    <span>SKU</span>
+                                    <strong>@CommerceWorkspace.Products.Sum(product => product.SkuVariants.Count)</strong>
+                                </div>
+                            </aside>
+
+                            <section class="commerce-pane commerce-plan-pane" aria-label="规划树与节点工作台">
+                                <header>
+                                    <div>
+                                        <span class="workspace-eyebrow">规划树</span>
+                                        <h3>图片方案</h3>
+                                    </div>
+                                    <button type="button" class="studio-button studio-button-light" disabled>
+                                        <Icon Type="branches" Theme="IconThemeType.Outline" />
+                                        <span>生成规划</span>
+                                    </button>
+                                </header>
+
+                                <div class="commerce-plan-empty">
+                                    <div class="commerce-product-core">
+                                        <Icon Type="shopping" Theme="IconThemeType.Outline" />
+                                        <strong>商品中心</strong>
+                                        <span>导入商品后，主图、场景图、细节图、对比图、尺寸图和 A+ 图会围绕商品事实展开。</span>
+                                    </div>
+                                    <div class="commerce-node-grid">
+                                        @foreach (var node in _commerceEmptyNodes)
+                                        {
+                                            <article>
+                                                <span>@node.Status</span>
+                                                <strong>@node.Title</strong>
+                                                <small>@node.Description</small>
+                                            </article>
+                                        }
+                                    </div>
+                                </div>
+                            </section>
+
+                            <aside class="commerce-pane commerce-results-pane" aria-label="结果、迭代与导出">
+                                <header>
+                                    <div>
+                                        <span class="workspace-eyebrow">结果与导出</span>
+                                        <h3>版本</h3>
+                                    </div>
+                                    <button type="button" class="commerce-icon-button" title="导出" disabled>
+                                        <Icon Type="download" Theme="IconThemeType.Outline" />
+                                    </button>
+                                </header>
+
+                                <div class="commerce-empty-block">
+                                    <Icon Type="picture" Theme="IconThemeType.Outline" />
+                                    <strong>等待首轮生成</strong>
+                                    <span>节点生成结果、创意分支、变体套用和导出预设会集中在这里评审。</span>
+                                </div>
+
+                                <div class="commerce-export-list">
+                                    <span>Amazon</span>
+                                    <span>Shopee</span>
+                                    <span>Shopify</span>
+                                    <span>独立站</span>
+                                </div>
+                            </aside>
+                        </div>
+                    }
+                    else if (IsGraphicWorkspace && _galleryOpen)
                     {
                         <div class="gallery-workspace">
                             <div class="gallery-toolbar">
@@ -329,6 +429,8 @@
                     </div>
                 }
 
+                @if (!IsCommerceWorkspace)
+                {
                 <section class="workspace-chat">
                     @if (IsGraphicWorkspace)
                     {
@@ -598,17 +700,21 @@
                              OnSubmit="@SendFromSender"
                              OnCancel="@Cancel" />
                 </section>
+                }
             </main>
 
-            <PromptLibraryPanel Class="@PromptPanelClass"
-                                Collapsed="@_rightPromptPanelCollapsed"
-                                CollapsedChanged="@SetRightPromptPanelCollapsed"
-                                Page="@_promptLibraryPage"
-                                IsLoading="@_promptLibraryLoading"
-                                Notice="@_promptLibraryNotice"
-                                OnQueryChanged="@LoadPromptLibraryPage"
-                                OnUse="@UsePrompt"
-                                OnCopy="@CopyPrompt" />
+            @if (!IsCommerceWorkspace)
+            {
+                <PromptLibraryPanel Class="@PromptPanelClass"
+                                    Collapsed="@_rightPromptPanelCollapsed"
+                                    CollapsedChanged="@SetRightPromptPanelCollapsed"
+                                    Page="@_promptLibraryPage"
+                                    IsLoading="@_promptLibraryLoading"
+                                    Notice="@_promptLibraryNotice"
+                                    OnQueryChanged="@LoadPromptLibraryPage"
+                                    OnUse="@UsePrompt"
+                                    OnCopy="@CopyPrompt" />
+            }
         </div>
     </div>
 

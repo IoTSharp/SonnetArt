@@ -81,6 +81,7 @@ internal static class StudioSnapshotLocalStorageCompactor
         return new StudioWorkspace
         {
             Id = workspace.Id,
+            Type = workspace.Type,
             Name = LimitText(workspace.Name, MaxTitleChars),
             CreatedAt = workspace.CreatedAt,
             UpdatedAt = workspace.UpdatedAt,
@@ -88,6 +89,91 @@ internal static class StudioSnapshotLocalStorageCompactor
             Sessions = sessions,
             ActiveSessionId = sessions.FirstOrDefault(session =>
                 string.Equals(session.Id, workspace.ActiveSessionId, StringComparison.Ordinal))?.Id ?? sessions.FirstOrDefault()?.Id,
+            CommerceWorkspace = CopyCommerceWorkspace(workspace.CommerceWorkspace, minimal),
+        };
+    }
+
+    private static CommerceWorkspaceState CopyCommerceWorkspace(CommerceWorkspaceState? commerceWorkspace, bool minimal)
+    {
+        if (commerceWorkspace is null)
+        {
+            return new CommerceWorkspaceState();
+        }
+
+        var productLimit = minimal ? 3 : 20;
+        var planLimit = minimal ? 3 : 20;
+        return new CommerceWorkspaceState
+        {
+            ActiveProductId = commerceWorkspace.ActiveProductId,
+            ActiveImagePlanId = commerceWorkspace.ActiveImagePlanId,
+            UpdatedAt = commerceWorkspace.UpdatedAt,
+            Products = commerceWorkspace.Products
+                .Take(productLimit)
+                .Select(CopyCommerceProduct)
+                .ToList(),
+            ImagePlans = commerceWorkspace.ImagePlans
+                .Take(planLimit)
+                .Select(CopyCommerceImagePlan)
+                .ToList(),
+        };
+    }
+
+    private static CommerceProduct CopyCommerceProduct(CommerceProduct product)
+    {
+        return new CommerceProduct
+        {
+            Id = product.Id,
+            Name = LimitText(product.Name, MaxTitleChars),
+            Description = LimitText(product.Description, MaxPromptChars),
+            SellingPoints = product.SellingPoints
+                .Take(20)
+                .Select(point => LimitText(point, 256))
+                .ToList(),
+            SkuVariants = product.SkuVariants
+                .Take(40)
+                .Select(CopyCommerceSkuVariant)
+                .ToList(),
+            CreatedAt = product.CreatedAt,
+            UpdatedAt = product.UpdatedAt,
+        };
+    }
+
+    private static CommerceSkuVariant CopyCommerceSkuVariant(CommerceSkuVariant variant)
+    {
+        return new CommerceSkuVariant
+        {
+            Id = variant.Id,
+            Name = LimitText(variant.Name, 128),
+            Color = LimitText(variant.Color, 128),
+            Sku = LimitText(variant.Sku, 128),
+        };
+    }
+
+    private static CommerceImagePlan CopyCommerceImagePlan(CommerceImagePlan plan)
+    {
+        return new CommerceImagePlan
+        {
+            Id = plan.Id,
+            ProductId = plan.ProductId,
+            Title = LimitText(plan.Title, MaxTitleChars),
+            Nodes = plan.Nodes
+                .Take(40)
+                .Select(CopyCommerceImageNode)
+                .ToList(),
+            CreatedAt = plan.CreatedAt,
+            UpdatedAt = plan.UpdatedAt,
+        };
+    }
+
+    private static CommerceImageNode CopyCommerceImageNode(CommerceImageNode node)
+    {
+        return new CommerceImageNode
+        {
+            Id = node.Id,
+            Type = LimitText(node.Type, 64),
+            Title = LimitText(node.Title, 128),
+            Status = LimitText(node.Status, 64),
+            PlannedCount = node.PlannedCount,
         };
     }
 

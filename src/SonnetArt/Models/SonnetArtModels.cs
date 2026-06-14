@@ -282,6 +282,7 @@ public sealed class StudioWorkspace
 {
     public const string GraphicType = "graphic";
     public const string CopyType = "copy";
+    public const string CommerceProductImageType = "commerce-product-image";
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Type { get; set; } = GraphicType;
@@ -291,6 +292,7 @@ public sealed class StudioWorkspace
     public DateTimeOffset LastOpenedAt { get; set; } = DateTimeOffset.Now;
     public List<StudioSession> Sessions { get; set; } = [];
     public string? ActiveSessionId { get; set; }
+    public CommerceWorkspaceState CommerceWorkspace { get; set; } = new();
 
     public static StudioWorkspace Create(string? name = null, string? type = null)
     {
@@ -318,6 +320,8 @@ public sealed class StudioWorkspace
         Type = NormalizeType(Type);
         Name = string.IsNullOrWhiteSpace(Name) ? DefaultName(Type) : Name.Trim();
         Sessions ??= [];
+        CommerceWorkspace ??= new CommerceWorkspaceState();
+        CommerceWorkspace.Normalize();
 
         if (Sessions.Count == 0)
         {
@@ -341,21 +345,170 @@ public sealed class StudioWorkspace
         return type?.Trim().ToLowerInvariant() switch
         {
             CopyType => CopyType,
+            CommerceProductImageType => CommerceProductImageType,
             _ => GraphicType,
         };
     }
 
     public static string DefaultName(string? type)
     {
-        return NormalizeType(type) == CopyType ? "文案空间" : "平面设计";
+        return NormalizeType(type) switch
+        {
+            CopyType => "文案空间",
+            CommerceProductImageType => "电商产品图",
+            _ => "平面设计",
+        };
     }
 
     public static StudioSession CreateDefaultSession(string? type)
     {
         return new StudioSession
         {
-            Title = NormalizeType(type) == CopyType ? "新建文案" : "新建作图",
+            Title = NormalizeType(type) switch
+            {
+                CopyType => "新建文案",
+                CommerceProductImageType => "商品图规划",
+                _ => "新建作图",
+            },
         };
+    }
+}
+
+public sealed class CommerceWorkspaceState
+{
+    public List<CommerceProduct> Products { get; set; } = [];
+    public string? ActiveProductId { get; set; }
+    public List<CommerceImagePlan> ImagePlans { get; set; } = [];
+    public string? ActiveImagePlanId { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
+
+    public void Normalize()
+    {
+        Products ??= [];
+        ImagePlans ??= [];
+
+        foreach (var product in Products)
+        {
+            product.Normalize();
+        }
+
+        foreach (var plan in ImagePlans)
+        {
+            plan.Normalize();
+        }
+
+        if (!string.IsNullOrWhiteSpace(ActiveProductId) &&
+            Products.All(product => product.Id != ActiveProductId))
+        {
+            ActiveProductId = null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(ActiveImagePlanId) &&
+            ImagePlans.All(plan => plan.Id != ActiveImagePlanId))
+        {
+            ActiveImagePlanId = null;
+        }
+    }
+}
+
+public sealed class CommerceProduct
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public List<string> SellingPoints { get; set; } = [];
+    public List<CommerceSkuVariant> SkuVariants { get; set; } = [];
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
+
+    public void Normalize()
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            Id = Guid.NewGuid().ToString("N");
+        }
+
+        Name = Name?.Trim() ?? string.Empty;
+        Description = Description?.Trim() ?? string.Empty;
+        SellingPoints = SellingPoints?
+            .Where(point => !string.IsNullOrWhiteSpace(point))
+            .Select(point => point.Trim())
+            .ToList() ?? [];
+        SkuVariants ??= [];
+
+        foreach (var variant in SkuVariants)
+        {
+            variant.Normalize();
+        }
+    }
+}
+
+public sealed class CommerceSkuVariant
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = string.Empty;
+    public string Color { get; set; } = string.Empty;
+    public string Sku { get; set; } = string.Empty;
+
+    public void Normalize()
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            Id = Guid.NewGuid().ToString("N");
+        }
+
+        Name = Name?.Trim() ?? string.Empty;
+        Color = Color?.Trim() ?? string.Empty;
+        Sku = Sku?.Trim() ?? string.Empty;
+    }
+}
+
+public sealed class CommerceImagePlan
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string ProductId { get; set; } = string.Empty;
+    public string Title { get; set; } = "首轮商品图方案";
+    public List<CommerceImageNode> Nodes { get; set; } = [];
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
+
+    public void Normalize()
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            Id = Guid.NewGuid().ToString("N");
+        }
+
+        ProductId = ProductId?.Trim() ?? string.Empty;
+        Title = string.IsNullOrWhiteSpace(Title) ? "首轮商品图方案" : Title.Trim();
+        Nodes ??= [];
+
+        foreach (var node in Nodes)
+        {
+            node.Normalize();
+        }
+    }
+}
+
+public sealed class CommerceImageNode
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Type { get; set; } = "main";
+    public string Title { get; set; } = "主图";
+    public string Status { get; set; } = "待规划";
+    public int PlannedCount { get; set; } = 4;
+
+    public void Normalize()
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            Id = Guid.NewGuid().ToString("N");
+        }
+
+        Type = string.IsNullOrWhiteSpace(Type) ? "main" : Type.Trim().ToLowerInvariant();
+        Title = string.IsNullOrWhiteSpace(Title) ? "主图" : Title.Trim();
+        Status = string.IsNullOrWhiteSpace(Status) ? "待规划" : Status.Trim();
+        PlannedCount = Math.Clamp(PlannedCount, 1, 12);
     }
 }
 
