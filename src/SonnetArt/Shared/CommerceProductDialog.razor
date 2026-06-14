@@ -1,0 +1,153 @@
+@if (Open)
+{
+    <div class="commerce-product-backdrop" @onclick="OnCancel">
+        <section class="commerce-product-dialog" role="dialog" aria-modal="true" aria-labelledby="commerce-product-title" @onclick:stopPropagation>
+            <header>
+                <div>
+                    <span class="workspace-eyebrow">商品档案</span>
+                    <h2 id="commerce-product-title">@Title</h2>
+                </div>
+                <button type="button" title="关闭" @onclick="OnCancel">
+                    <Icon Type="close" Theme="IconThemeType.Outline" />
+                </button>
+            </header>
+
+            <div class="commerce-product-form">
+                <label class="studio-field">
+                    <span class="studio-label">商品名称</span>
+                    <input class="studio-input" value="@Name" @oninput="NameChanged" placeholder="例如：不锈钢保温杯 600ml" />
+                </label>
+
+                <label class="studio-field">
+                    <span class="studio-label">目标人群</span>
+                    <input class="studio-input" value="@TargetAudience" @oninput="TargetAudienceChanged" placeholder="例如：通勤白领、户外徒步用户、学生" />
+                </label>
+
+                <label class="studio-field commerce-field-wide">
+                    <span class="studio-label">商品描述</span>
+                    <textarea class="studio-textarea" value="@Description" @oninput="DescriptionChanged" placeholder="描述材质、功能、定位、使用场景和品牌调性"></textarea>
+                </label>
+
+                <label class="studio-field">
+                    <span class="studio-label">核心卖点</span>
+                    <textarea class="studio-textarea" value="@SellingPoints" @oninput="SellingPointsChanged" placeholder="每行一个卖点，例如：&#10;316 不锈钢内胆&#10;24 小时保温&#10;单手开盖防漏"></textarea>
+                </label>
+
+                <label class="studio-field">
+                    <span class="studio-label">规格信息</span>
+                    <textarea class="studio-textarea" value="@Specifications" @oninput="SpecificationsChanged" placeholder="容量、尺寸、重量、材质、包装清单等"></textarea>
+                </label>
+
+                <label class="studio-field">
+                    <span class="studio-label">产品参考图</span>
+                    <textarea class="studio-textarea" value="@ReferenceImages" @oninput="ReferenceImagesChanged" placeholder="每行一个图片 URL 或 file-...，本地上传会自动加入这里。"></textarea>
+                </label>
+
+                <div class="studio-field">
+                    <span class="studio-label">上传产品图</span>
+                    <InputFile class="studio-file"
+                               accept="image/*"
+                               multiple
+                               OnChange="@ReferenceFilesChanged" />
+                    <small class="studio-helper">上传后默认作为 product 参考图角色。</small>
+                </div>
+
+                @if (ReferenceImageItems.Count > 0)
+                {
+                    <div class="commerce-reference-grid commerce-field-wide">
+                        @foreach (var item in ReferenceImageItems)
+                        {
+                            <figure>
+                                @if (item.IsImage)
+                                {
+                                    <img src="@item.Value" alt="产品参考图" />
+                                }
+                                else
+                                {
+                                    <Icon Type="link" Theme="IconThemeType.Outline" />
+                                }
+                                <figcaption>@item.Label</figcaption>
+                            </figure>
+                        }
+                    </div>
+                }
+
+                <label class="studio-field">
+                    <span class="studio-label">SKU 变体</span>
+                    <textarea class="studio-textarea" value="@SkuVariants" @oninput="SkuVariantsChanged" placeholder="每行一个：名称 | 颜色 | SKU，例如：&#10;晨雾白 | 白色 | CUP-WHITE-600&#10;松石绿 | 绿色 | CUP-GREEN-600"></textarea>
+                </label>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(Error))
+            {
+                <p class="commerce-product-error">@Error</p>
+            }
+
+            <footer>
+                <button type="button" class="studio-button studio-button-light" @onclick="OnCancel">
+                    <span>取消</span>
+                </button>
+                <button type="button" class="studio-button studio-button-primary" disabled="@SubmitDisabled" @onclick="OnSubmit">
+                    <Icon Type="save" Theme="IconThemeType.Outline" />
+                    <span>@SubmitText</span>
+                </button>
+            </footer>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public string Title { get; set; } = "新增商品";
+    [Parameter] public string SubmitText { get; set; } = "保存商品";
+    [Parameter] public bool SubmitDisabled { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Description { get; set; } = string.Empty;
+    [Parameter] public string SellingPoints { get; set; } = string.Empty;
+    [Parameter] public string Specifications { get; set; } = string.Empty;
+    [Parameter] public string TargetAudience { get; set; } = string.Empty;
+    [Parameter] public string ReferenceImages { get; set; } = string.Empty;
+    [Parameter] public string SkuVariants { get; set; } = string.Empty;
+    [Parameter] public EventCallback<ChangeEventArgs> NameChanged { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> DescriptionChanged { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> SellingPointsChanged { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> SpecificationsChanged { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> TargetAudienceChanged { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> ReferenceImagesChanged { get; set; }
+    [Parameter] public EventCallback<InputFileChangeEventArgs> ReferenceFilesChanged { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> SkuVariantsChanged { get; set; }
+    [Parameter] public EventCallback OnSubmit { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private IReadOnlyList<ReferenceImageItem> ReferenceImageItems =>
+        (ReferenceImages ?? string.Empty)
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Take(16)
+            .Select(value => new ReferenceImageItem(
+                value,
+                value.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase) ||
+                    value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                    value.StartsWith("https://", StringComparison.OrdinalIgnoreCase),
+                ReferenceImageLabel(value)))
+            .ToArray();
+
+    private static string ReferenceImageLabel(string value)
+    {
+        if (value.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "本地上传";
+        }
+
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            var name = Path.GetFileName(uri.LocalPath);
+            return string.IsNullOrWhiteSpace(name) ? uri.Host : name;
+        }
+
+        return value.Length <= 28 ? value : $"{value[..25]}...";
+    }
+
+    private sealed record ReferenceImageItem(string Value, bool IsImage, string Label);
+}

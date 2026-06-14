@@ -1,0 +1,237 @@
+@using SonnetArt.Models
+
+<div class="commerce-workspace">
+    <aside class="commerce-pane commerce-products-pane" aria-label="商品与批次">
+        <header>
+            <div>
+                <span class="workspace-eyebrow">商品与批次</span>
+                <h3>商品档案</h3>
+            </div>
+            <button type="button" class="commerce-icon-button" title="新增商品" @onclick="OnNewProduct">
+                <Icon Type="plus" Theme="IconThemeType.Outline" />
+            </button>
+        </header>
+
+        @if (Workspace.Products.Count == 0)
+        {
+            <div class="commerce-empty-block">
+                <Icon Type="inbox" Theme="IconThemeType.Outline" />
+                <strong>还没有商品</strong>
+                <span>录入商品名称、描述、卖点、规格、SKU 和产品参考图后，会在这里形成档案。</span>
+            </div>
+        }
+        else
+        {
+            <div class="commerce-product-list">
+                @foreach (var product in Workspace.Products.OrderByDescending(product => product.UpdatedAt))
+                {
+                    <article class="@ProductItemClass(product)">
+                        <button type="button" class="commerce-product-main" @onclick="() => OnSelectProduct.InvokeAsync(product.Id)">
+                            <strong>@product.Name</strong>
+                            <span>@ProductPreview(product)</span>
+                            <small>@ProductMeta(product)</small>
+                        </button>
+                        <div class="commerce-product-actions">
+                            <button type="button" title="AI 商品分析" @onclick="() => AnalyzeProductFromList(product)">
+                                <Icon Type="experiment" Theme="IconThemeType.Outline" />
+                            </button>
+                            <button type="button" title="编辑商品" @onclick="() => OnEditProduct.InvokeAsync(product)">
+                                <Icon Type="edit" Theme="IconThemeType.Outline" />
+                            </button>
+                            <button type="button" title="删除商品" @onclick="() => OnDeleteProduct.InvokeAsync(product)">
+                                <Icon Type="delete" Theme="IconThemeType.Outline" />
+                            </button>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+
+        <div class="commerce-summary">
+            <span>商品</span>
+            <strong>@Workspace.Products.Count</strong>
+            <span>SKU</span>
+            <strong>@Workspace.Products.Sum(product => product.SkuVariants.Count)</strong>
+        </div>
+    </aside>
+
+    <section class="commerce-pane commerce-plan-pane" aria-label="规划树与节点工作台">
+        <header>
+            <div>
+                <span class="workspace-eyebrow">规划树</span>
+                <h3>@(ActivePlan?.Title ?? "图片方案")</h3>
+            </div>
+            <div class="commerce-header-actions">
+                <button type="button" class="studio-button studio-button-light" disabled="@(!CanAnalyzeProduct)" @onclick="OnAnalyzeProduct">
+                    <Icon Type="experiment" Theme="IconThemeType.Outline" />
+                    <span>AI 分析</span>
+                </button>
+                <button type="button" class="studio-button studio-button-light" disabled="@(!CanGeneratePlan)" @onclick="OnGeneratePlan">
+                    <Icon Type="branches" Theme="IconThemeType.Outline" />
+                    <span>生成规划</span>
+                </button>
+            </div>
+        </header>
+
+        <div class="commerce-plan-empty">
+            <div class="commerce-product-core">
+                <Icon Type="shopping" Theme="IconThemeType.Outline" />
+                <strong>@(ActiveProduct?.Name ?? "商品中心")</strong>
+                <span>@ProductCoreText</span>
+            </div>
+
+            @if (ActiveProduct?.Analysis.HasContent == true)
+            {
+                <section class="commerce-analysis-panel" aria-label="AI 商品分析">
+                    <header>
+                        <div>
+                            <span class="workspace-eyebrow">AI 商品分析</span>
+                            <strong>@(string.IsNullOrWhiteSpace(ActiveProduct.Analysis.ProductType) ? "商品理解" : ActiveProduct.Analysis.ProductType)</strong>
+                        </div>
+                        @if (ActiveProduct.Analysis.AnalyzedAt is not null)
+                        {
+                            <time>@ActiveProduct.Analysis.AnalyzedAt.Value.ToLocalTime().ToString("MM-dd HH:mm")</time>
+                        }
+                    </header>
+                    @if (!string.IsNullOrWhiteSpace(ActiveProduct.Analysis.Summary))
+                    {
+                        <p>@ActiveProduct.Analysis.Summary</p>
+                    }
+                    <div class="commerce-analysis-grid">
+                        @foreach (var group in AnalysisGroups)
+                        {
+                            @if (group.Items.Count > 0)
+                            {
+                                <div>
+                                    <span>@group.Title</span>
+                                    <ul>
+                                        @foreach (var item in group.Items)
+                                        {
+                                            <li>@item</li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                        }
+                    </div>
+                </section>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(AnalysisMessage))
+            {
+                <p class="@AnalysisMessageClass">@AnalysisMessage</p>
+            }
+
+            <div class="commerce-node-grid">
+                @foreach (var node in Nodes)
+                {
+                    <article class="@(node.Enabled ? null : "disabled")">
+                        <span>@node.Status</span>
+                        <strong>@node.Title</strong>
+                        <small>@(string.IsNullOrWhiteSpace(node.Goal) ? node.Prompt : node.Goal)</small>
+                        @if (!string.IsNullOrWhiteSpace(node.AspectRatio) && node.AspectRatio != "auto")
+                        {
+                            <em>@node.AspectRatio · @node.PlannedCount 张</em>
+                        }
+                    </article>
+                }
+            </div>
+        </div>
+    </section>
+
+    <aside class="commerce-pane commerce-results-pane" aria-label="结果、迭代与导出">
+        <header>
+            <div>
+                <span class="workspace-eyebrow">结果与导出</span>
+                <h3>版本</h3>
+            </div>
+            <button type="button" class="commerce-icon-button" title="导出" disabled>
+                <Icon Type="download" Theme="IconThemeType.Outline" />
+            </button>
+        </header>
+
+        <div class="commerce-empty-block">
+            <Icon Type="picture" Theme="IconThemeType.Outline" />
+            <strong>等待首轮生成</strong>
+            <span>节点生成结果、创意分支、变体套用和导出预设会集中在这里评审。</span>
+        </div>
+
+        <div class="commerce-export-list">
+            <span>Amazon</span>
+            <span>Shopee</span>
+            <span>Shopify</span>
+            <span>独立站</span>
+        </div>
+    </aside>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CommerceWorkspaceState Workspace { get; set; } = new();
+    [Parameter] public CommerceProduct? ActiveProduct { get; set; }
+    [Parameter] public CommerceImagePlan? ActivePlan { get; set; }
+    [Parameter] public IReadOnlyList<CommerceImageNode> Nodes { get; set; } = [];
+    [Parameter] public bool CanGeneratePlan { get; set; }
+    [Parameter] public bool CanAnalyzeProduct { get; set; }
+    [Parameter] public string? AnalysisMessage { get; set; }
+    [Parameter] public bool AnalysisMessageIsError { get; set; }
+    [Parameter] public EventCallback OnNewProduct { get; set; }
+    [Parameter] public EventCallback<string> OnSelectProduct { get; set; }
+    [Parameter] public EventCallback<CommerceProduct> OnEditProduct { get; set; }
+    [Parameter] public EventCallback<CommerceProduct> OnDeleteProduct { get; set; }
+    [Parameter] public EventCallback OnAnalyzeProduct { get; set; }
+    [Parameter] public EventCallback OnGeneratePlan { get; set; }
+
+    private string ProductCoreText => ActiveProduct is null
+        ? "导入商品后，主图、场景图、细节图、对比图、尺寸图和 A+ 图会围绕商品事实展开。"
+        : $"{ActiveProduct.SellingPoints.Count} 个卖点，{ActiveProduct.SkuVariants.Count} 个 SKU，{ActiveProduct.ReferenceImages.Count} 张产品参考图，{(ActiveProduct.Analysis.HasContent ? "已分析" : "待分析")}。";
+
+    private IReadOnlyList<AnalysisGroup> AnalysisGroups => ActiveProduct?.Analysis is null
+        ? []
+        :
+        [
+            new("核心卖点", ActiveProduct.Analysis.CoreSellingPoints),
+            new("适用场景", ActiveProduct.Analysis.UseScenarios),
+            new("颜色变体", ActiveProduct.Analysis.ColorVariants),
+            new("材质特性", ActiveProduct.Analysis.MaterialFeatures),
+            new("目标人群", ActiveProduct.Analysis.TargetAudiences),
+        ];
+
+    private string AnalysisMessageClass => AnalysisMessageIsError
+        ? "commerce-analysis-message error"
+        : "commerce-analysis-message";
+
+    private async Task AnalyzeProductFromList(CommerceProduct product)
+    {
+        if (!string.Equals(product.Id, ActiveProduct?.Id, StringComparison.Ordinal))
+        {
+            await OnSelectProduct.InvokeAsync(product.Id);
+        }
+
+        await OnAnalyzeProduct.InvokeAsync();
+    }
+
+    private string ProductItemClass(CommerceProduct product) =>
+        string.Equals(product.Id, ActiveProduct?.Id, StringComparison.Ordinal)
+            ? "commerce-product-item active"
+            : "commerce-product-item";
+
+    private static string ProductPreview(CommerceProduct product)
+    {
+        if (!string.IsNullOrWhiteSpace(product.Description))
+        {
+            return product.Description;
+        }
+
+        if (product.SellingPoints.Count > 0)
+        {
+            return string.Join(" / ", product.SellingPoints.Take(3));
+        }
+
+        return "未填写描述";
+    }
+
+    private static string ProductMeta(CommerceProduct product) =>
+        $"{product.SellingPoints.Count} 个卖点 · {product.SkuVariants.Count} 个 SKU · {product.ReferenceImages.Count} 张参考图 · {(product.Analysis.HasContent ? "已分析" : "待分析")}";
+
+    private sealed record AnalysisGroup(string Title, IReadOnlyList<string> Items);
+}

@@ -128,6 +128,38 @@ public sealed class PromptChatClient
         return await SendChatAsync(settings, messages, temperature: 0.65, cancellationToken);
     }
 
+    public async Task<CommerceProductAnalysis> AnalyzeCommerceProductAsync(
+        StudioSettings settings,
+        CommerceProduct product,
+        CancellationToken cancellationToken)
+    {
+        var content = await SendChatAsync(
+            settings,
+            [
+                new ChatMessage("system", BuildCommerceProductAnalysisSystemPrompt()),
+                new ChatMessage("user", BuildCommerceProductAnalysisUserPrompt(product)),
+            ],
+            temperature: 0.2,
+            cancellationToken);
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<CommerceProductAnalysis>(ExtractJson(content), JsonOptions)
+                ?? new CommerceProductAnalysis();
+            result.Normalize();
+            result.AnalyzedAt = DateTimeOffset.Now;
+            return result;
+        }
+        catch (JsonException)
+        {
+            return new CommerceProductAnalysis
+            {
+                Summary = content.Trim(),
+                AnalyzedAt = DateTimeOffset.Now,
+            };
+        }
+    }
+
     private static string BuildCopyWorkspaceSystemPrompt() =>
         """
         你是 SonnetArt 文案空间里的资深中文文案策划、诊断与改写助手。你的任务是帮助用户写作、改写、扩写、润色、提炼标题、生成营销文案、短视频脚本、广告文案、私域文案、品牌文案和内容结构。不要提作图。
@@ -160,6 +192,59 @@ public sealed class PromptChatClient
         - 用户要润色时，先保留原意，再提升清晰度、节奏、情绪、信任和行动指令。
         - 每次回答尽量短而有用，不要把所有诊断维度都堆出来；根据文案类型挑最重要的部分。
         """;
+
+    private static string BuildCommerceProductAnalysisSystemPrompt() =>
+        """
+        你是电商商品图策划中的商品理解分析器。你只返回 JSON，不要解释，不要 Markdown。
+        根据商品名称、描述、卖点、规格、目标人群、SKU 和参考图线索，提炼用于商品图规划的稳定事实。
+        不要编造品牌、认证、价格、疗效、夸张承诺或无法从输入合理推断的信息；不确定时用保守表述。
+        返回格式：
+        {
+          "productType": "简短产品类型",
+          "coreSellingPoints": ["核心卖点1"],
+          "useScenarios": ["适用场景1"],
+          "colorVariants": ["颜色或外观变体1"],
+          "materialFeatures": ["材质/工艺/触感特性1"],
+          "targetAudiences": ["目标人群1"],
+          "summary": "一句中文商品图策划摘要"
+        }
+        每个数组最多 8 项，每项不超过 24 个中文字符。
+        """;
+
+    private static string BuildCommerceProductAnalysisUserPrompt(CommerceProduct product)
+    {
+        product.Normalize();
+        var references = product.ReferenceImages
+            .Select(DescribeReferenceImage)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToArray();
+
+        return $"""
+        商品名称：{product.Name}
+        商品描述：{product.Description}
+        已填卖点：{string.Join("；", product.SellingPoints)}
+        规格信息：{product.Specifications}
+        已填目标人群：{product.TargetAudience}
+        SKU 变体：{string.Join("；", product.SkuVariants.Select(variant => $"{variant.Name} {variant.Color} {variant.Sku}".Trim()))}
+        参考图线索：{string.Join("；", references)}
+        """;
+    }
+
+    private static string DescribeReferenceImage(string value)
+    {
+        if (value.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "本地上传产品图";
+        }
+
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            var fileName = Path.GetFileNameWithoutExtension(uri.LocalPath);
+            return string.IsNullOrWhiteSpace(fileName) ? uri.Host : fileName;
+        }
+
+        return value.Length <= 80 ? value : value[..80];
+    }
 
     private async Task<string> SendChatAsync(
         StudioSettings settings,

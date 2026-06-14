@@ -416,8 +416,13 @@ public sealed class CommerceProduct
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
+    public string Specifications { get; set; } = string.Empty;
+    public string TargetAudience { get; set; } = string.Empty;
     public List<string> SellingPoints { get; set; } = [];
+    public List<string> ReferenceImages { get; set; } = [];
+    public string ReferenceRole { get; set; } = "product";
     public List<CommerceSkuVariant> SkuVariants { get; set; } = [];
+    public CommerceProductAnalysis Analysis { get; set; } = new();
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
 
@@ -430,16 +435,74 @@ public sealed class CommerceProduct
 
         Name = Name?.Trim() ?? string.Empty;
         Description = Description?.Trim() ?? string.Empty;
+        Specifications = Specifications?.Trim() ?? string.Empty;
+        TargetAudience = TargetAudience?.Trim() ?? string.Empty;
         SellingPoints = SellingPoints?
             .Where(point => !string.IsNullOrWhiteSpace(point))
             .Select(point => point.Trim())
             .ToList() ?? [];
+        ReferenceImages = ReferenceImages?
+            .Where(image => !string.IsNullOrWhiteSpace(image))
+            .Select(image => image.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .ToList() ?? [];
+        ReferenceRole = StudioSnapshot.NormalizeReferenceRole(ReferenceRole) == "auto"
+            ? "product"
+            : StudioSnapshot.NormalizeReferenceRole(ReferenceRole);
         SkuVariants ??= [];
 
         foreach (var variant in SkuVariants)
         {
             variant.Normalize();
         }
+
+        Analysis ??= new CommerceProductAnalysis();
+        Analysis.Normalize();
+    }
+}
+
+public sealed class CommerceProductAnalysis
+{
+    public string ProductType { get; set; } = string.Empty;
+    public List<string> CoreSellingPoints { get; set; } = [];
+    public List<string> UseScenarios { get; set; } = [];
+    public List<string> ColorVariants { get; set; } = [];
+    public List<string> MaterialFeatures { get; set; } = [];
+    public List<string> TargetAudiences { get; set; } = [];
+    public string Summary { get; set; } = string.Empty;
+    public DateTimeOffset? AnalyzedAt { get; set; }
+
+    [JsonIgnore]
+    public bool HasContent =>
+        !string.IsNullOrWhiteSpace(ProductType) ||
+        CoreSellingPoints.Count > 0 ||
+        UseScenarios.Count > 0 ||
+        ColorVariants.Count > 0 ||
+        MaterialFeatures.Count > 0 ||
+        TargetAudiences.Count > 0 ||
+        !string.IsNullOrWhiteSpace(Summary);
+
+    public void Normalize()
+    {
+        ProductType = ProductType?.Trim() ?? string.Empty;
+        CoreSellingPoints = NormalizeList(CoreSellingPoints, 12, 128);
+        UseScenarios = NormalizeList(UseScenarios, 12, 128);
+        ColorVariants = NormalizeList(ColorVariants, 20, 96);
+        MaterialFeatures = NormalizeList(MaterialFeatures, 12, 128);
+        TargetAudiences = NormalizeList(TargetAudiences, 12, 128);
+        Summary = Summary?.Trim() ?? string.Empty;
+    }
+
+    private static List<string> NormalizeList(IEnumerable<string>? values, int maxItems, int maxLength)
+    {
+        return values?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(maxItems)
+            .Select(value => value.Length <= maxLength ? value : value[..maxLength].TrimEnd())
+            .ToList() ?? [];
     }
 }
 
@@ -495,6 +558,12 @@ public sealed class CommerceImageNode
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Type { get; set; } = "main";
     public string Title { get; set; } = "主图";
+    public string Goal { get; set; } = string.Empty;
+    public string AspectRatio { get; set; } = "1:1";
+    public string Prompt { get; set; } = string.Empty;
+    public string NegativePrompt { get; set; } = string.Empty;
+    public string ReferenceRole { get; set; } = "product";
+    public bool Enabled { get; set; } = true;
     public string Status { get; set; } = "待规划";
     public int PlannedCount { get; set; } = 4;
 
@@ -507,6 +576,13 @@ public sealed class CommerceImageNode
 
         Type = string.IsNullOrWhiteSpace(Type) ? "main" : Type.Trim().ToLowerInvariant();
         Title = string.IsNullOrWhiteSpace(Title) ? "主图" : Title.Trim();
+        Goal = Goal?.Trim() ?? string.Empty;
+        AspectRatio = StudioSettings.NormalizeAspectRatio(AspectRatio);
+        Prompt = Prompt?.Trim() ?? string.Empty;
+        NegativePrompt = NegativePrompt?.Trim() ?? string.Empty;
+        ReferenceRole = StudioSnapshot.NormalizeReferenceRole(ReferenceRole) == "auto"
+            ? "product"
+            : StudioSnapshot.NormalizeReferenceRole(ReferenceRole);
         Status = string.IsNullOrWhiteSpace(Status) ? "待规划" : Status.Trim();
         PlannedCount = Math.Clamp(PlannedCount, 1, 12);
     }

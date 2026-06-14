@@ -14,6 +14,7 @@ internal static class StudioSnapshotLocalStorageCompactor
     private const int MaxMessageChars = 8_000;
     private const int MaxMinimalMessageChars = 2_000;
     private const int MaxReferenceChars = 4_096;
+    private const int MaxEmbeddedReferenceChars = 1_000_000;
     private const int MaxAdvancedJsonChars = 64_000;
 
     public static StudioSnapshot CreateCompactSnapshot(StudioSnapshot snapshot)
@@ -125,16 +126,45 @@ internal static class StudioSnapshotLocalStorageCompactor
             Id = product.Id,
             Name = LimitText(product.Name, MaxTitleChars),
             Description = LimitText(product.Description, MaxPromptChars),
+            Specifications = LimitText(product.Specifications, MaxPromptChars),
+            TargetAudience = LimitText(product.TargetAudience, 512),
             SellingPoints = product.SellingPoints
                 .Take(20)
                 .Select(point => LimitText(point, 256))
                 .ToList(),
+            ReferenceImages = product.ReferenceImages
+                .Take(16)
+                .Select(LimitReferenceImage)
+                .Where(image => !string.IsNullOrWhiteSpace(image))
+                .ToList(),
+            ReferenceRole = product.ReferenceRole,
             SkuVariants = product.SkuVariants
                 .Take(40)
                 .Select(CopyCommerceSkuVariant)
                 .ToList(),
+            Analysis = CopyCommerceProductAnalysis(product.Analysis),
             CreatedAt = product.CreatedAt,
             UpdatedAt = product.UpdatedAt,
+        };
+    }
+
+    private static CommerceProductAnalysis CopyCommerceProductAnalysis(CommerceProductAnalysis? analysis)
+    {
+        if (analysis is null)
+        {
+            return new CommerceProductAnalysis();
+        }
+
+        return new CommerceProductAnalysis
+        {
+            ProductType = LimitText(analysis.ProductType, 128),
+            CoreSellingPoints = analysis.CoreSellingPoints.Take(12).Select(point => LimitText(point, 128)).ToList(),
+            UseScenarios = analysis.UseScenarios.Take(12).Select(scenario => LimitText(scenario, 128)).ToList(),
+            ColorVariants = analysis.ColorVariants.Take(20).Select(color => LimitText(color, 96)).ToList(),
+            MaterialFeatures = analysis.MaterialFeatures.Take(12).Select(feature => LimitText(feature, 128)).ToList(),
+            TargetAudiences = analysis.TargetAudiences.Take(12).Select(audience => LimitText(audience, 128)).ToList(),
+            Summary = LimitText(analysis.Summary, 512),
+            AnalyzedAt = analysis.AnalyzedAt,
         };
     }
 
@@ -172,6 +202,12 @@ internal static class StudioSnapshotLocalStorageCompactor
             Id = node.Id,
             Type = LimitText(node.Type, 64),
             Title = LimitText(node.Title, 128),
+            Goal = LimitText(node.Goal, 512),
+            AspectRatio = node.AspectRatio,
+            Prompt = LimitText(node.Prompt, MaxPromptChars),
+            NegativePrompt = LimitText(node.NegativePrompt, MaxPromptChars),
+            ReferenceRole = node.ReferenceRole,
+            Enabled = node.Enabled,
             Status = LimitText(node.Status, 64),
             PlannedCount = node.PlannedCount,
         };
@@ -319,5 +355,16 @@ internal static class StudioSnapshotLocalStorageCompactor
     {
         var text = value?.Trim() ?? string.Empty;
         return text.Length <= maxLength ? text : text[..maxLength].TrimEnd();
+    }
+
+    private static string LimitReferenceImage(string? value)
+    {
+        var text = value?.Trim() ?? string.Empty;
+        if (text.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+        {
+            return text.Length <= MaxEmbeddedReferenceChars ? text : string.Empty;
+        }
+
+        return LimitText(text, MaxReferenceChars);
     }
 }
