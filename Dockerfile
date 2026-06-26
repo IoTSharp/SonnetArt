@@ -23,7 +23,6 @@ WORKDIR /app
 COPY --from=build /app/ ./
 COPY --from=build /out/wwwroot/ ./wwwroot/
 
-ENV SONNET_ART_PUBLIC_ORIGIN=:8080
 EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "SonnetHost.dll"]

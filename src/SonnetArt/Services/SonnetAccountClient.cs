@@ -10,7 +10,6 @@ namespace SonnetArt.Services;
 
 public sealed class SonnetAccountClient
 {
-    private const string DefaultGatewayBaseUrl = "https://sonnet.vip/";
     private const string LocalProxyRoot = "/api/sonnet/";
     private const string LocalProxyHeader = "X-SonnetArt-Proxy";
     private const string SonnetArtKeyName = "SonnetArt Image";
@@ -453,42 +452,22 @@ public sealed class SonnetAccountClient
         string? accessToken,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await SendOnceAsync<T>(
-                settings,
-                method,
-                path,
-                body,
-                accessToken,
-                useLocalProxy: true,
-                cancellationToken);
-        }
-        catch (SonnetProxyUnavailableException)
-        {
-            return await SendOnceAsync<T>(
-                settings,
-                method,
-                path,
-                body,
-                accessToken,
-                useLocalProxy: false,
-                cancellationToken);
-        }
+        return await SendOnceAsync<T>(
+            method,
+            path,
+            body,
+            accessToken,
+            cancellationToken);
     }
 
     private async Task<T> SendOnceAsync<T>(
-        StudioSettings settings,
         HttpMethod method,
         string path,
         object? body,
         string? accessToken,
-        bool useLocalProxy,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(
-            method,
-            useLocalProxy ? BuildLocalProxyEndpoint(path) : BuildEndpoint(settings.BaseUrl, path));
+        using var request = new HttpRequestMessage(method, BuildLocalProxyEndpoint(path));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.AcceptLanguage.ParseAdd("zh-CN");
 
@@ -504,9 +483,9 @@ public sealed class SonnetAccountClient
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         var raw = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (useLocalProxy && !IsLocalProxyResponse(response))
+        if (!IsLocalProxyResponse(response))
         {
-            throw new SonnetProxyUnavailableException();
+            throw new HttpRequestException("账户服务代理未启用。请检查 SonnetHost 的 SonnetArt:AccountUpstreamUrl 配置。");
         }
 
         if (!response.IsSuccessStatusCode)
@@ -880,44 +859,8 @@ public sealed class SonnetAccountClient
         return new Uri(LocalProxyRoot + path.TrimStart('/'), UriKind.Relative);
     }
 
-    private static Uri BuildEndpoint(string baseUrl, string path)
-    {
-        var root = ResolveAbsoluteBaseUrl(baseUrl);
-        if (!root.EndsWith("api/v1/", StringComparison.OrdinalIgnoreCase))
-        {
-            root += "api/v1/";
-        }
-
-        return new Uri(new Uri(root, UriKind.Absolute), path.TrimStart('/'));
-    }
-
-    private static string ResolveAbsoluteBaseUrl(string? baseUrl)
-    {
-        var root = string.IsNullOrWhiteSpace(baseUrl) ||
-            string.Equals(baseUrl.Trim(), "/", StringComparison.Ordinal)
-                ? DefaultGatewayBaseUrl
-                : baseUrl.Trim();
-
-        if (!Uri.TryCreate(root, UriKind.Absolute, out var uri) ||
-            uri.Scheme is not ("http" or "https"))
-        {
-            root = DefaultGatewayBaseUrl;
-        }
-
-        if (!root.EndsWith('/'))
-        {
-            root += "/";
-        }
-
-        return root;
-    }
-
     private static string? EmptyToNull(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-    }
-
-    private sealed class SonnetProxyUnavailableException : Exception
-    {
     }
 }

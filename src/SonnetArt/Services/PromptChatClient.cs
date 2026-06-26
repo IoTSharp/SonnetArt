@@ -10,7 +10,6 @@ namespace SonnetArt.Services;
 
 public sealed class PromptChatClient
 {
-    private const string DefaultBaseUrl = "https://sonnet.vip/";
     private const string LocalProxyRoot = "/api/openai/";
     private const string LocalProxyHeader = "X-SonnetArt-Proxy";
     private const string DefaultModel = "gpt-5.5";
@@ -848,26 +847,12 @@ public sealed class PromptChatClient
         }
 
         const string endpointPath = "v1/chat/completions";
-        try
-        {
-            return await SendChatWithTransientRetryAsync(
-                settings,
-                endpointPath,
-                messages,
-                temperature,
-                useLocalProxy: true,
-                cancellationToken);
-        }
-        catch (PromptChatProxyUnavailableException)
-        {
-            return await SendChatWithTransientRetryAsync(
-                settings,
-                endpointPath,
-                messages,
-                temperature,
-                useLocalProxy: false,
-                cancellationToken);
-        }
+        return await SendChatWithTransientRetryAsync(
+            settings,
+            endpointPath,
+            messages,
+            temperature,
+            cancellationToken);
     }
 
     private async Task<string> SendChatWithTransientRetryAsync(
@@ -875,14 +860,13 @@ public sealed class PromptChatClient
         string endpointPath,
         IReadOnlyList<ChatMessage> messages,
         double temperature,
-        bool useLocalProxy,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; attempt <= MaxTransientChatAttempts; attempt++)
         {
             try
             {
-                return await SendChatOnceAsync(settings, endpointPath, messages, temperature, useLocalProxy, cancellationToken);
+                return await SendChatOnceAsync(settings, endpointPath, messages, temperature, cancellationToken);
             }
             catch (HttpRequestException ex) when (!cancellationToken.IsCancellationRequested &&
                 IsTransientChatStatusCode(ex.StatusCode) &&
@@ -900,12 +884,9 @@ public sealed class PromptChatClient
         string endpointPath,
         IReadOnlyList<ChatMessage> messages,
         double temperature,
-        bool useLocalProxy,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Post,
-            useLocalProxy ? BuildLocalProxyEndpoint(endpointPath) : BuildEndpoint(settings.BaseUrl, endpointPath))
+        using var request = new HttpRequestMessage(HttpMethod.Post, BuildLocalProxyEndpoint(endpointPath))
         {
             Content = JsonContent.Create(new ChatCompletionRequest(
                 StudioSettings.NormalizeChatModel(settings.ChatModel),
@@ -917,9 +898,9 @@ public sealed class PromptChatClient
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         var raw = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (useLocalProxy && !response.Headers.Contains(LocalProxyHeader))
+        if (!response.Headers.Contains(LocalProxyHeader))
         {
-            throw new PromptChatProxyUnavailableException();
+            throw new HttpRequestException("会话接口代理未启用。请检查 SonnetHost 的 SonnetArt:AiUpstreamUrl 配置。");
         }
 
         if (!response.IsSuccessStatusCode)
@@ -946,27 +927,6 @@ public sealed class PromptChatClient
     private static Uri BuildLocalProxyEndpoint(string endpointPath)
     {
         return new Uri(LocalProxyRoot + endpointPath.TrimStart('/'), UriKind.Relative);
-    }
-
-    private static Uri BuildEndpoint(string baseUrl, string endpointPath)
-    {
-        var root = string.IsNullOrWhiteSpace(baseUrl) ||
-            string.Equals(baseUrl.Trim(), "/", StringComparison.Ordinal)
-                ? DefaultBaseUrl
-                : baseUrl.Trim();
-
-        if (!Uri.TryCreate(root, UriKind.Absolute, out var uri) ||
-            uri.Scheme is not ("http" or "https"))
-        {
-            root = DefaultBaseUrl;
-        }
-
-        if (!root.EndsWith('/'))
-        {
-            root += "/";
-        }
-
-        return new Uri(new Uri(root, UriKind.Absolute), endpointPath.TrimStart('/'));
     }
 
     private static string ExtractJson(string value)
@@ -1009,8 +969,6 @@ public sealed class PromptChatClient
                 ? text.Trim()
                 : null;
     }
-
-    private sealed class PromptChatProxyUnavailableException : Exception;
 }
 
 public sealed record PromptIntentResult(

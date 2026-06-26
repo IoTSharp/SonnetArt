@@ -1,129 +1,90 @@
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SonnetArt.Models;
-using Microsoft.JSInterop;
 
 namespace SonnetArt.Services;
 
 public sealed class SonnetArtStorage
 {
-    private const string StorageKey = "sonnetart.snapshot.v1";
-    private const int LocalStorageFullSnapshotCharacterLimit = 4_000_000;
-
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         WriteIndented = false,
     };
 
-    private readonly IJSRuntime _jsRuntime;
+    private readonly HttpClient _httpClient;
 
-    public SonnetArtStorage(IJSRuntime jsRuntime)
+    public SonnetArtStorage(HttpClient httpClient)
     {
-        _jsRuntime = jsRuntime;
+        _httpClient = httpClient;
     }
 
-    public async ValueTask<StudioSnapshot> LoadAsync()
+    public async ValueTask<StudioSnapshot> LoadAsync(string? accessToken = null)
     {
-        string? json;
+        return await TryLoadAsync(accessToken) ?? CreateDefaultSnapshot();
+    }
+
+    public async ValueTask<StudioSnapshot?> TryLoadAsync(string? accessToken = null)
+    {
         try
         {
-            json = await _jsRuntime.InvokeAsync<string?>("localStorage.getItem", StorageKey);
-        }
-        catch (JSException)
-        {
-            return CreateDefaultSnapshot();
-        }
-        catch (JSDisconnectedException)
-        {
-            return CreateDefaultSnapshot();
-        }
+            using var request = new HttpRequestMessage(HttpMethod.Get, "api/studio/snapshot");
+            ApplyAuthorization(request, accessToken);
+            using var response = await _httpClient.SendAsync(request);
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+            {
+                return null;
+            }
 
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return CreateDefaultSnapshot();
-        }
-
-        try
-        {
-            var snapshot = JsonSerializer.Deserialize<StudioSnapshot>(json, JsonOptions);
+            response.EnsureSuccessStatusCode();
+            var snapshot = await response.Content.ReadFromJsonAsync<StudioSnapshot>(JsonOptions);
             if (snapshot is null)
             {
-                return CreateDefaultSnapshot();
+                return null;
             }
 
             EnsureSnapshot(snapshot);
             return snapshot;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
         {
-            return CreateDefaultSnapshot();
+            return null;
         }
     }
 
-    public async ValueTask SaveAsync(StudioSnapshot snapshot)
+    public async ValueTask SaveAsync(StudioSnapshot snapshot, string? accessToken = null)
     {
         EnsureSnapshot(snapshot);
 
-        var json = JsonSerializer.Serialize(snapshot, JsonOptions);
-        if (json.Length <= LocalStorageFullSnapshotCharacterLimit &&
-            await TrySaveToLocalStorageAsync(json))
+        using var request = new HttpRequestMessage(HttpMethod.Put, "api/studio/snapshot")
         {
-            return;
-        }
-
-        await TryRemoveLocalStorageAsync();
-
-        var compactJson = JsonSerializer.Serialize(
-            StudioSnapshotLocalStorageCompactor.CreateCompactSnapshot(snapshot),
-            JsonOptions);
-        if (compactJson.Length <= LocalStorageFullSnapshotCharacterLimit &&
-            await TrySaveToLocalStorageAsync(compactJson))
-        {
-            return;
-        }
-
-        await TryRemoveLocalStorageAsync();
-
-        var minimalJson = JsonSerializer.Serialize(
-            StudioSnapshotLocalStorageCompactor.CreateMinimalSnapshot(snapshot),
-            JsonOptions);
-        await TrySaveToLocalStorageAsync(minimalJson);
+            Content = JsonContent.Create(snapshot, options: JsonOptions),
+        };
+        ApplyAuthorization(request, accessToken);
+        using var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
     }
 
-    public async ValueTask ClearAsync()
+    public async ValueTask ClearAsync(string? accessToken = null)
     {
-        await TryRemoveLocalStorageAsync();
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "api/studio/snapshot");
+        ApplyAuthorization(request, accessToken);
+        using var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
     }
 
-    private async Task<bool> TrySaveToLocalStorageAsync(string json)
+    public async ValueTask ClearAuthSessionAsync()
     {
-        try
-        {
-            await _jsRuntime.InvokeVoidAsync("localStorage.setItem", StorageKey, json);
-            return true;
-        }
-        catch (JSException)
-        {
-            return false;
-        }
-        catch (JSDisconnectedException)
-        {
-            return false;
-        }
+        using var response = await _httpClient.DeleteAsync("api/studio/auth-session");
+        response.EnsureSuccessStatusCode();
     }
 
-    private async Task TryRemoveLocalStorageAsync()
+    private static void ApplyAuthorization(HttpRequestMessage request, string? accessToken)
     {
-        try
+        if (!string.IsNullOrWhiteSpace(accessToken))
         {
-            await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", StorageKey);
-        }
-        catch (JSException)
-        {
-        }
-        catch (JSDisconnectedException)
-        {
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken.Trim());
         }
     }
 

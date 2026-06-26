@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using SonnetArt.Models;
+using SonnetHost.Configuration;
 
 namespace SonnetHost.PromptLibrary;
 
@@ -8,22 +10,22 @@ public sealed class PromptLibraryImageCacheWarmupService : BackgroundService
 {
     private const int MaxConcurrency = 4;
     private readonly IServiceProvider _services;
+    private readonly IOptions<SonnetArtHostOptions> _options;
     private readonly ILogger<PromptLibraryImageCacheWarmupService> _logger;
 
     public PromptLibraryImageCacheWarmupService(
         IServiceProvider services,
+        IOptions<SonnetArtHostOptions> options,
         ILogger<PromptLibraryImageCacheWarmupService> logger)
     {
         _services = services;
+        _options = options;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (string.Equals(
-            Environment.GetEnvironmentVariable("SONNET_ART_PROMPT_IMAGE_WARMUP"),
-            "false",
-            StringComparison.OrdinalIgnoreCase))
+        if (!_options.Value.PromptImageWarmup)
         {
             return;
         }

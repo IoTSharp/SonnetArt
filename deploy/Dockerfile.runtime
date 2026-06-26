@@ -4,7 +4,6 @@ WORKDIR /app
 COPY app/ ./
 COPY wwwroot/ ./wwwroot/
 
-ENV SONNET_ART_PUBLIC_ORIGIN=:8080
 EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "SonnetHost.dll"]

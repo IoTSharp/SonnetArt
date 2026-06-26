@@ -492,7 +492,7 @@ public partial class Home
     protected override async Task OnInitializedAsync()
     {
         _launchContext = EmbeddedLaunchContextParser.Parse(Navigation);
-        _snapshot = await Storage.LoadAsync();
+        _snapshot = await Storage.LoadAsync(_launchContext.AccessToken);
         ApplyLaunchContext(_launchContext);
         _branding = await SiteConfig.LoadBrandingAsync();
         await LoadPromptLibraryPage(new PromptLibraryQuery(
@@ -3231,7 +3231,7 @@ public partial class Home
     private async Task SaveAsync()
     {
         _snapshot.Normalize();
-        await Storage.SaveAsync(_snapshot);
+        await Storage.SaveAsync(_snapshot, Settings.SonnetAccessToken);
     }
 
     private async Task SyncDocumentThemeAsync()
@@ -3273,7 +3273,7 @@ public partial class Home
         {
             var response = await SonnetClient.LoginAsync(Settings, _sonnetEmail, _sonnetPassword);
             await CompleteAccountSetupAsync();
-            await SaveAsync();
+            await AdoptAuthenticatedSnapshotAsync();
             _sonnetPassword = string.Empty;
             _settingsOpen = false;
             SetSonnetMessage($"已登录 {response.User?.Email ?? _sonnetEmail}。");
@@ -3293,7 +3293,7 @@ public partial class Home
                 _sonnetInvitationCode,
                 _sonnetAffiliateCode);
             await CompleteAccountSetupAsync();
-            await SaveAsync();
+            await AdoptAuthenticatedSnapshotAsync();
             _sonnetPassword = string.Empty;
             _sonnetRegisterOpen = false;
             _settingsOpen = false;
@@ -3357,13 +3357,15 @@ public partial class Home
 
     private async Task SignOutSonnet()
     {
+        var previousAccessToken = Settings.SonnetAccessToken;
         await StopPaymentPollingAsync();
         _paymentOverlayOpen = false;
         _activePaymentOrder = null;
         _latestPaymentStatus = null;
         _paymentQrImageSource = null;
         SonnetClient.SignOut(Settings);
-        await SaveAsync();
+        await Storage.SaveAsync(_snapshot, previousAccessToken);
+        await Storage.ClearAuthSessionAsync();
         _settingsOpen = false;
         SetSonnetMessage("已退出登录。");
     }
@@ -3466,7 +3468,7 @@ public partial class Home
         try
         {
             await CompleteAccountSetupAsync();
-            await SaveAsync();
+            await AdoptAuthenticatedSnapshotAsync();
             SetSonnetMessage(_launchCredentialsConsumed ? "已通过 sub2api 自动登录。" : "账户已恢复。");
         }
         catch (Exception ex)
@@ -3486,6 +3488,46 @@ public partial class Home
         await SonnetClient.RefreshProfileAsync(Settings);
         await SonnetClient.EnsureSonnetArtApiKeyAsync(Settings);
         await SonnetClient.EnsureOpenAiApiKeyAsync(Settings);
+    }
+
+    private async Task AdoptAuthenticatedSnapshotAsync()
+    {
+        var authenticatedSettings = Settings;
+        var serverSnapshot = await Storage.TryLoadAsync(authenticatedSettings.SonnetAccessToken);
+        if (serverSnapshot is null)
+        {
+            await SaveAsync();
+            return;
+        }
+
+        CopyAccountSettings(authenticatedSettings, serverSnapshot.Settings);
+        _snapshot = serverSnapshot;
+        EnsureActiveMode();
+        await SaveAsync();
+    }
+
+    private static void CopyAccountSettings(StudioSettings source, StudioSettings target)
+    {
+        target.SonnetAccessToken = source.SonnetAccessToken;
+        target.SonnetRefreshToken = source.SonnetRefreshToken;
+        target.SonnetTokenExpiresAt = source.SonnetTokenExpiresAt;
+        target.SonnetUser = source.SonnetUser;
+        target.SonnetApiKeyId = source.SonnetApiKeyId;
+        target.SonnetApiKeyName = source.SonnetApiKeyName;
+        target.SonnetGroupId = source.SonnetGroupId;
+        target.SonnetGroupName = source.SonnetGroupName;
+        target.ImageApiKey = source.ImageApiKey;
+        target.SonnetOpenAiApiKeyId = source.SonnetOpenAiApiKeyId;
+        target.SonnetOpenAiApiKeyName = source.SonnetOpenAiApiKeyName;
+        target.SonnetOpenAiGroupId = source.SonnetOpenAiGroupId;
+        target.SonnetOpenAiGroupName = source.SonnetOpenAiGroupName;
+        target.OpenAiApiKey = source.OpenAiApiKey;
+        target.SonnetPaymentType = source.SonnetPaymentType;
+        target.EmbeddedUserId = source.EmbeddedUserId;
+        target.EmbeddedUiMode = source.EmbeddedUiMode;
+        target.EmbeddedLanguage = source.EmbeddedLanguage;
+        target.EmbeddedSourceHost = source.EmbeddedSourceHost;
+        target.EmbeddedSourceUrl = source.EmbeddedSourceUrl;
     }
 
     private void OpenPaymentOverlay(SonnetCreateOrderResult order)

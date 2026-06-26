@@ -18,17 +18,18 @@ English | [中文](README.zh.md)
 - 🗂️ Workspaces and sessions for organizing prompts, conversations, parameters, and generation history by task.
 - 🖼️ Gallery view with search, filters, favorites, tags, parameter copy, prompt copy, download, and regeneration actions.
 - 🧪 Matrix comparison workflows for exploring prompt, model, size, and parameter combinations.
-- 💾 Local browser persistence for studio state and user preferences.
+- 💾 Server-side persistence for studio state, user preferences, sessions, and generation history.
 - 🔗 Embedded mode with launch parameters such as `theme`, `lang`, `ui_mode`, `src_host`, and `src_url`.
 - 🔐 sub2api auto-login through launch parameters such as `token`, `access_token`, `auth_token`, `jwt`, and `bearer_token`.
 - 🐳 Docker deployment with the ASP.NET Core SonnetHost serving static assets and proxying account and OpenAI-compatible image APIs.
 
 ## 🧭 Architecture
 
-SonnetArt is a frontend-first static web application. When deployed with Docker, the bundled ASP.NET Core 10 SonnetHost serves static assets and reverse proxies API traffic:
+SonnetArt is a browser application backed by the bundled ASP.NET Core 10 SonnetHost. When deployed with Docker, SonnetHost serves static assets, persists studio snapshots on the server, and reverse proxies API traffic:
 
-- `/api/openai/*` proxies to `SONNET_ART_AI_UPSTREAM_URL` for an OpenAI-compatible image model gateway.
-- `/api/sonnet/*` proxies to `SONNET_ART_ACCOUNT_UPSTREAM_URL` and rewrites requests under `/api/v1` for account and sub2api-compatible APIs.
+- `/api/openai/*` proxies to `SonnetArt:AiUpstreamUrl` for an OpenAI-compatible image model gateway.
+- `/api/sonnet/*` proxies to `SonnetArt:AccountUpstreamUrl` and rewrites requests under `/api/v1` for account and sub2api-compatible APIs.
+- `/api/studio/snapshot` persists the studio snapshot through the configured SonnetDB server connection.
 
 Authentication, quota enforcement, metering, billing, and model routing should live in the upstream gateway. SonnetArt focuses on the open creative interface and browser experience.
 
@@ -44,7 +45,7 @@ From the repository root:
 
 On Windows, you can also run `start-web.cmd`. The script restores the required .NET workload, starts SonnetHost at `http://localhost:5131`, and opens the browser.
 
-Without any upstream configuration, SonnetArt proxies account and OpenAI-compatible image requests to `https://sonnet.vip`.
+Configure upstreams and storage through ASP.NET Core configuration, for example `appsettings.Development.json`.
 
 ### Run with Docker
 
@@ -57,12 +58,17 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    environment:
-      SONNET_ART_PUBLIC_ORIGIN: :8080
-      SONNET_ART_AI_UPSTREAM_URL: http://sub2api:8080
-      SONNET_ART_ACCOUNT_UPSTREAM_URL: http://sub2api:8080
+    volumes:
+      - ./appsettings.Production.json:/app/appsettings.Production.json:ro
     depends_on:
       - sub2api
+      - sonnetdb
+
+  sonnetdb:
+    image: iotsharp/sonnetdb:latest
+    restart: unless-stopped
+    expose:
+      - "5080"
 
   sub2api:
     image: weishaw/sub2api:latest
@@ -77,13 +83,29 @@ services:
       - ./data/sub2api:/app/data
 ```
 
-### ⚙️ Environment Variables
+Create `appsettings.Production.json` next to the compose file:
 
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `SONNET_ART_PUBLIC_ORIGIN` | No | `:8080` | SonnetHost listen address. Containers usually keep `:8080`. |
-| `SONNET_ART_AI_UPSTREAM_URL` | No | `https://sonnet.vip` | OpenAI-compatible image model gateway URL. |
-| `SONNET_ART_ACCOUNT_UPSTREAM_URL` | No | `https://sonnet.vip` | Account / sub2api-compatible API URL. |
+```json
+{
+  "SonnetArt": {
+    "PublicOrigin": ":8080",
+    "AiUpstreamUrl": "http://sub2api:8080/",
+    "AccountUpstreamUrl": "http://sub2api:8080/",
+    "SonnetDbConnection": "Data Source=sonnetdb+http://sonnetdb:5080/sonnetart;Token=change-me-sonnetdb-token",
+    "PromptImageWarmup": true
+  }
+}
+```
+
+### ⚙️ Configuration
+
+| Key | Required | Description |
+| --- | --- | --- |
+| `SonnetArt:PublicOrigin` | Yes | SonnetHost listen address. Containers usually keep `:8080`. |
+| `SonnetArt:AiUpstreamUrl` | Yes | OpenAI-compatible image model gateway URL. |
+| `SonnetArt:AccountUpstreamUrl` | Yes | Account / sub2api-compatible API URL. |
+| `SonnetArt:SonnetDbConnection` | Yes | SonnetDB server connection string for server-side studio persistence. |
+| `SonnetArt:PromptImageWarmup` | No | Whether to prefetch remote prompt-library images. |
 
 ## 🔗 Embedded Mode
 

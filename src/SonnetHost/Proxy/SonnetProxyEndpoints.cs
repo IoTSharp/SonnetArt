@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Extensions;
+using Microsoft.Extensions.Options;
+using SonnetHost.Configuration;
 
 namespace SonnetHost.Proxy;
 
@@ -8,7 +10,6 @@ public static class SonnetProxyEndpoints
 {
     public const string HttpClientName = "sonnet-proxy";
     private const string ProxyMarkerHeader = "X-SonnetArt-Proxy";
-    private const string DefaultUpstreamBaseUrl = "https://sonnet.vip/";
     private const long MaxProxyRequestBodyBytes = 96L * 1024 * 1024;
 
     private static readonly string[] SupportedMethods =
@@ -49,7 +50,7 @@ public static class SonnetProxyEndpoints
     {
         return ProxyConfiguredUpstreamAsync(
             context,
-            "SONNET_ART_ACCOUNT_UPSTREAM_URL",
+            options => options.ResolveAccountUpstreamUri(),
             rewriteAccountPath: true,
             "账户服务");
     }
@@ -58,21 +59,22 @@ public static class SonnetProxyEndpoints
     {
         return ProxyConfiguredUpstreamAsync(
             context,
-            "SONNET_ART_AI_UPSTREAM_URL",
+            options => options.ResolveAiUpstreamUri(),
             rewriteAccountPath: false,
             "上游服务");
     }
 
     private static async Task ProxyConfiguredUpstreamAsync(
         HttpContext context,
-        string environmentVariable,
+        Func<SonnetArtHostOptions, Uri> resolveUpstream,
         bool rewriteAccountPath,
         string serviceLabel)
     {
         Uri baseUrl;
         try
         {
-            baseUrl = ReadEnvironmentUrl(environmentVariable);
+            var options = context.RequestServices.GetRequiredService<IOptions<SonnetArtHostOptions>>().Value;
+            baseUrl = resolveUpstream(options);
         }
         catch (InvalidOperationException ex)
         {
@@ -142,24 +144,6 @@ public static class SonnetProxyEndpoints
                 $"无法连接{serviceLabel}：{ex.Message}",
                 cancellationToken);
         }
-    }
-
-    private static Uri ReadEnvironmentUrl(string variableName)
-    {
-        var raw = Environment.GetEnvironmentVariable(variableName);
-        var root = string.IsNullOrWhiteSpace(raw) ? DefaultUpstreamBaseUrl : raw.Trim();
-        if (!root.EndsWith('/'))
-        {
-            root += "/";
-        }
-
-        if (!Uri.TryCreate(root, UriKind.Absolute, out var uri) ||
-            uri.Scheme is not ("http" or "https"))
-        {
-            throw new InvalidOperationException($"{variableName} 必须是 http 或 https 绝对地址。");
-        }
-
-        return uri;
     }
 
     private static Uri BuildTargetUri(

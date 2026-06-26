@@ -2,13 +2,39 @@ using System.Net;
 using System.IO.Compression;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
+using SonnetDB.EntityFrameworkCore.Extensions;
+using SonnetHost.Configuration;
 using SonnetHost.PromptLibrary;
 using SonnetHost.Proxy;
+using SonnetHost.StudioStorage;
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
-builder.WebHost.UseUrls(ResolveListenUrl());
+var sonnetArtConfiguration = builder.Configuration.GetRequiredSection(SonnetArtHostOptions.SectionName);
+var hostOptions = sonnetArtConfiguration
+    .Get<SonnetArtHostOptions>() ?? new SonnetArtHostOptions();
+hostOptions.Validate();
+builder.Services
+    .AddOptions<SonnetArtHostOptions>()
+    .Bind(sonnetArtConfiguration)
+    .Validate(options =>
+    {
+        try
+        {
+            options.Validate();
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }, $"{SonnetArtHostOptions.SectionName} configuration is invalid.")
+    .ValidateOnStart();
+
+builder.WebHost.UseUrls(hostOptions.ResolveListenUrl());
 builder.WebHost.UseStaticWebAssets();
 builder.Services.AddResponseCompression(options =>
 {
@@ -43,9 +69,22 @@ builder.Services.AddHttpClient("prompt-library-images", client =>
     client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
 })
 .ConfigurePrimaryHttpMessageHandler(CreateProxyHandler);
+builder.Services.AddHttpClient("sonnet-storage-auth", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+    client.DefaultRequestVersion = HttpVersion.Version11;
+    client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+})
+.ConfigurePrimaryHttpMessageHandler(CreateProxyHandler);
+builder.Services.AddDbContext<SonnetArtDbContext>(options =>
+    options.UseSonnetDB(hostOptions.ResolveSonnetDbConnectionString()));
+builder.Services.AddScoped<StudioSnapshotStore>();
+builder.Services.AddScoped<SonnetArtIdentityResolver>();
+builder.Services.AddSingleton<SonnetArtStorageSchemaInitializer>();
 builder.Services.AddHostedService<PromptLibraryImageCacheWarmupService>();
 
 var app = builder.Build();
+await app.Services.GetRequiredService<SonnetArtStorageSchemaInitializer>().InitializeAsync();
 
 app.Use(async (context, next) =>
 {
@@ -76,6 +115,7 @@ app.Use(async (context, next) =>
 app.UseSonnetArtSecurityHeaders();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapPromptLibraryEndpoints();
+app.MapStudioSnapshotEndpoints();
 app.MapSonnetProxyEndpoints();
 app.UseResponseCompression();
 app.UseSonnetArtFrameworkAliases();
@@ -85,23 +125,6 @@ app.UseSonnetArtStaticFiles();
 app.MapFallbackToFile("index.html");
 
 await app.RunAsync();
-
-static string ResolveListenUrl()
-{
-    var publicOrigin = Environment.GetEnvironmentVariable("SONNET_ART_PUBLIC_ORIGIN");
-    if (!string.IsNullOrWhiteSpace(publicOrigin))
-    {
-        var origin = publicOrigin.Trim();
-        return origin.StartsWith(':')
-            ? $"http://+{origin}"
-            : origin;
-    }
-
-    var urls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
-    return string.IsNullOrWhiteSpace(urls)
-        ? "http://+:8080"
-        : urls;
-}
 
 static SocketsHttpHandler CreateProxyHandler()
 {
