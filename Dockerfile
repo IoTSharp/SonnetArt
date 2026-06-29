@@ -1,18 +1,22 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
+ARG SONNET_ART_PROJECT=src/SonnetArt/SonnetArt.csproj
+ARG SONNET_HOST_PROJECT=src/SonnetHost/SonnetHost.csproj
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
-RUN dotnet workload restore src/SonnetArt/SonnetArt.csproj
-RUN dotnet publish src/SonnetArt/SonnetArt.csproj \
+COPY external/SonnetDB /SonnetDB
+RUN dotnet workload restore "$SONNET_ART_PROJECT"
+RUN dotnet publish "$SONNET_ART_PROJECT" \
     -c Release \
     -f net10.0 \
     -o /out \
     /p:RunAOTCompilation=true
-RUN dotnet publish src/SonnetHost/SonnetHost.csproj \
+RUN dotnet publish "$SONNET_HOST_PROJECT" \
     -c Release \
     -f net10.0 \
     -o /app
