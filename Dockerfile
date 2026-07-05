@@ -9,7 +9,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
-COPY external/SonnetDB /SonnetDB
 RUN dotnet workload restore "$SONNET_ART_PROJECT"
 RUN dotnet publish "$SONNET_ART_PROJECT" \
     -c Release \

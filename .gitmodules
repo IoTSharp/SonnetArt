@@ -4,3 +4,6 @@
 [submodule "external/IoTSharp.Data.JsonDB"]
 	path = external/IoTSharp.Data.JsonDB
 	url = https://github.com/IoTSharp/Data.JsonDB.git
+[submodule "external/SonnetDB"]
+	path = external/SonnetDB
+	url = https://github.com/IoTSharp/SonnetDB.git

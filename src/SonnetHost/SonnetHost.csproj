@@ -16,7 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\SonnetArt\SonnetArt.csproj" />
     <ProjectReference Include="..\..\external\IoTSharp.Data.JsonDB\src\IoTSharp.Data.JsonDB\IoTSharp.Data.JsonDB.csproj" />
-    <ProjectReference Include="..\..\..\SonnetDB\src\SonnetDB.EntityFrameworkCore\SonnetDB.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\external\SonnetDB\src\SonnetDB.EntityFrameworkCore\SonnetDB.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
 </Project>
