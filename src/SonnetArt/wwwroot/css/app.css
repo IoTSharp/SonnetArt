@@ -2040,6 +2040,7 @@ html[data-sonnetart-theme="dark"] .commerce-pane,
 
 .commerce-node-actions {
     display: grid;
+    grid-template-columns: repeat(2, 28px);
     gap: 5px;
 }
 
@@ -2057,6 +2058,12 @@ html[data-sonnetart-theme="dark"] .commerce-pane,
 .commerce-node-actions button:hover:not(:disabled) {
     color: var(--studio-ink);
     border-color: var(--studio-line-strong);
+}
+
+.commerce-node-actions button.commerce-node-danger:hover:not(:disabled) {
+    color: var(--studio-danger);
+    border-color: rgba(255, 77, 79, 0.35);
+    background: rgba(255, 77, 79, 0.08);
 }
 
 .commerce-node-actions button:disabled {

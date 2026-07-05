@@ -70,6 +70,10 @@
                     <Icon Type="branches" Theme="IconThemeType.Outline" />
                     <span>AI 规划</span>
                 </button>
+                <button type="button" class="studio-button studio-button-light" disabled="@(ActivePlan is null)" @onclick="OnAddNode">
+                    <Icon Type="plus" Theme="IconThemeType.Outline" />
+                    <span>节点</span>
+                </button>
             </div>
         </header>
 
@@ -136,8 +140,9 @@
 
             <div class="commerce-planning-board">
                 <div class="commerce-node-list" aria-label="规划节点">
-                    @foreach (var node in Nodes)
+                    @for (var index = 0; index < Nodes.Count; index++)
                     {
+                        var node = Nodes[index];
                         <article class="@NodeItemClass(node)">
                             <button type="button" class="commerce-node-main" @onclick="() => OnSelectNode.InvokeAsync(node.Id)">
                                 <span>@node.Status</span>
@@ -154,6 +159,18 @@
                                 </button>
                                 <button type="button" title="启用或暂停" disabled="@(ActivePlan is null)" @onclick="() => OnToggleNode.InvokeAsync(node)">
                                     <Icon Type="pause-circle" Theme="IconThemeType.Outline" />
+                                </button>
+                                <button type="button" title="上移节点" disabled="@(ActivePlan is null || index == 0)" @onclick="() => OnMoveNodeUp.InvokeAsync(node)">
+                                    <Icon Type="arrow-up" Theme="IconThemeType.Outline" />
+                                </button>
+                                <button type="button" title="下移节点" disabled="@(ActivePlan is null || index >= Nodes.Count - 1)" @onclick="() => OnMoveNodeDown.InvokeAsync(node)">
+                                    <Icon Type="arrow-down" Theme="IconThemeType.Outline" />
+                                </button>
+                                <button type="button" title="复制节点" disabled="@(ActivePlan is null)" @onclick="() => OnDuplicateNode.InvokeAsync(node)">
+                                    <Icon Type="copy" Theme="IconThemeType.Outline" />
+                                </button>
+                                <button type="button" class="commerce-node-danger" title="删除节点" disabled="@(ActivePlan is null)" @onclick="() => OnDeleteNode.InvokeAsync(node)">
+                                    <Icon Type="delete" Theme="IconThemeType.Outline" />
                                 </button>
                             </div>
                         </article>
@@ -527,9 +544,14 @@
     [Parameter] public EventCallback<CommerceProduct> OnDeleteProduct { get; set; }
     [Parameter] public EventCallback OnAnalyzeProduct { get; set; }
     [Parameter] public EventCallback OnGeneratePlan { get; set; }
+    [Parameter] public EventCallback OnAddNode { get; set; }
     [Parameter] public EventCallback<string> OnSelectNode { get; set; }
     [Parameter] public EventCallback<CommerceImageNode> OnToggleNode { get; set; }
     [Parameter] public EventCallback<CommerceImageNode> OnUpdateNode { get; set; }
+    [Parameter] public EventCallback<CommerceImageNode> OnDuplicateNode { get; set; }
+    [Parameter] public EventCallback<CommerceImageNode> OnDeleteNode { get; set; }
+    [Parameter] public EventCallback<CommerceImageNode> OnMoveNodeUp { get; set; }
+    [Parameter] public EventCallback<CommerceImageNode> OnMoveNodeDown { get; set; }
     [Parameter] public EventCallback<CommerceImageNode> OnApplyNode { get; set; }
     [Parameter] public EventCallback<CommerceImageNode> OnGenerateNode { get; set; }
     [Parameter] public EventCallback OnGenerateAllNodes { get; set; }

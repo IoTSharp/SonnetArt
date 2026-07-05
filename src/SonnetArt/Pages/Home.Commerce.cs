@@ -34,6 +34,7 @@ public partial class Home
     private string _commerceExportFileNamePattern = "{sku}-{node}-{index}";
     private const int CommerceMaxReferenceImages = 16;
     private const long CommerceMaxReferenceFileSize = 12 * 1024 * 1024;
+    private const string CommerceDefaultNegativePrompt = "避免改变产品结构、品牌信息错误、文字乱码、比例失真、廉价直播电商风、过度装饰、模糊细节。";
     private static readonly JsonSerializerOptions CommerceExportJsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -402,6 +403,123 @@ public partial class Home
         updatedNode.Normalize();
         updatedNode.Status = updatedNode.Enabled ? "已编辑" : "已暂停";
         plan.Nodes[index] = updatedNode;
+        plan.UpdatedAt = DateTimeOffset.Now;
+        TouchCommerceWorkspace();
+        await SaveAsync();
+    }
+
+    private async Task AddCommercePlanNode()
+    {
+        var product = ActiveCommerceProduct;
+        var plan = ActiveCommercePlan;
+        if (product is null || plan is null)
+        {
+            return;
+        }
+
+        var title = NextCommerceNodeTitle(plan, "自定义节点");
+        var facts = BuildCommerceProductFacts(product);
+        var node = new CommerceImageNode
+        {
+            Type = "custom",
+            Title = title,
+            Goal = "补充一张当前方案未覆盖的商品图。",
+            AspectRatio = StudioSettings.NormalizeAspectRatio(Settings.AspectRatio),
+            PlannedCount = 2,
+            Scene = "根据当前商品定位选择合适背景",
+            Composition = "围绕商品主体构图，保持产品比例、材质和关键卖点真实可信。",
+            KeyMessage = "补充表达商品卖点",
+            Prompt = $"{facts}{Environment.NewLine}{Environment.NewLine}图片任务：补充一张当前方案未覆盖的商品图，保持产品一致性、画面干净、适合电商详情页。",
+            NegativePrompt = CommerceDefaultNegativePrompt,
+            ReferenceRole = "product",
+            Enabled = true,
+            Status = "新增节点",
+        };
+        node.Normalize();
+
+        var selectedIndex = string.IsNullOrWhiteSpace(_commerceSelectedNodeId)
+            ? -1
+            : plan.Nodes.FindIndex(item => string.Equals(item.Id, _commerceSelectedNodeId, StringComparison.Ordinal));
+        var insertIndex = selectedIndex >= 0 ? selectedIndex + 1 : plan.Nodes.Count;
+        plan.Nodes.Insert(insertIndex, node);
+        _commerceSelectedNodeId = node.Id;
+        plan.UpdatedAt = DateTimeOffset.Now;
+        TouchCommerceWorkspace();
+        await SaveAsync();
+    }
+
+    private async Task DuplicateCommercePlanNode(CommerceImageNode sourceNode)
+    {
+        var plan = ActiveCommercePlan;
+        if (plan is null)
+        {
+            return;
+        }
+
+        var sourceIndex = FindCommerceNodeIndex(plan, sourceNode.Id);
+        if (sourceIndex < 0)
+        {
+            return;
+        }
+
+        var copy = CopyCommercePlanNodeDraft(plan.Nodes[sourceIndex]);
+        copy.Title = NextCommerceNodeTitle(plan, $"{copy.Title} 副本");
+        copy.Status = "复制节点";
+        copy.Normalize();
+
+        plan.Nodes.Insert(sourceIndex + 1, copy);
+        _commerceSelectedNodeId = copy.Id;
+        plan.UpdatedAt = DateTimeOffset.Now;
+        TouchCommerceWorkspace();
+        await SaveAsync();
+    }
+
+    private async Task DeleteCommercePlanNode(CommerceImageNode node)
+    {
+        var plan = ActiveCommercePlan;
+        if (plan is null)
+        {
+            return;
+        }
+
+        var index = FindCommerceNodeIndex(plan, node.Id);
+        if (index < 0)
+        {
+            return;
+        }
+
+        plan.Nodes.RemoveAt(index);
+        _commerceSelectedNodeId = plan.Nodes.Count == 0
+            ? null
+            : plan.Nodes[Math.Min(index, plan.Nodes.Count - 1)].Id;
+        plan.UpdatedAt = DateTimeOffset.Now;
+        TouchCommerceWorkspace();
+        await SaveAsync();
+    }
+
+    private Task MoveCommercePlanNodeUp(CommerceImageNode node) =>
+        MoveCommercePlanNode(node, -1);
+
+    private Task MoveCommercePlanNodeDown(CommerceImageNode node) =>
+        MoveCommercePlanNode(node, 1);
+
+    private async Task MoveCommercePlanNode(CommerceImageNode node, int direction)
+    {
+        var plan = ActiveCommercePlan;
+        if (plan is null)
+        {
+            return;
+        }
+
+        var index = FindCommerceNodeIndex(plan, node.Id);
+        var targetIndex = index + direction;
+        if (index < 0 || targetIndex < 0 || targetIndex >= plan.Nodes.Count)
+        {
+            return;
+        }
+
+        (plan.Nodes[index], plan.Nodes[targetIndex]) = (plan.Nodes[targetIndex], plan.Nodes[index]);
+        _commerceSelectedNodeId = node.Id;
         plan.UpdatedAt = DateTimeOffset.Now;
         TouchCommerceWorkspace();
         await SaveAsync();
@@ -1601,18 +1719,65 @@ public partial class Home
     private static List<CommerceImageNode> CreateCommercePlanNodes(CommerceProduct product)
     {
         var facts = BuildCommerceProductFacts(product);
-        const string negative = "避免改变产品结构、品牌信息错误、文字乱码、比例失真、廉价直播电商风、过度装饰、模糊细节。";
 
         return
         [
-            CreateCommercePlanNode("main", "主图", "用于平台首图，清晰展示商品主体和核心外观。", "1:1", 4, facts, "干净白底或浅灰背景，商品居中，真实摄影质感，边缘清晰，可用于电商搜索列表。", negative),
-            CreateCommercePlanNode("scene", "场景图", "展示目标人群的真实使用场景。", "4:3", 4, facts, "把商品放入符合目标人群的生活方式场景，保留产品比例和材质，光线自然，有明确购买想象。", negative),
-            CreateCommercePlanNode("detail", "细节图", "放大材质、结构、工艺和关键卖点。", "1:1", 3, facts, "微距商品摄影，突出核心卖点、材质纹理、结构细节和使用触感，画面干净。", negative),
-            CreateCommercePlanNode("compare", "对比图", "表达卖点、效果或规格差异。", "4:3", 2, facts, "采用克制的信息图构图，左右或上下对比，少量清晰标签，突出商品优势。", negative),
-            CreateCommercePlanNode("size", "尺寸图", "说明尺寸、容量、包装规格或套装内容。", "1:1", 2, facts, "商品比例准确，加入简洁尺寸标注和规格信息，背景干净，信息层级清楚。", negative),
-            CreateCommercePlanNode("aplus", "A+ 图", "用于详情页模块、品牌故事和卖点长图。", "3:4", 3, facts, "详情页模块式竖版视觉，包含商品主视觉、卖点区块和场景氛围，文字极少且清晰。", negative),
-            CreateCommercePlanNode("package", "包装图", "展示包装、套装、赠品和到手内容。", "1:1", 2, facts, "商品与包装盒、套装配件整齐陈列，真实棚拍，适合平台详情页和活动页。", negative),
+            CreateCommercePlanNode("main", "主图", "用于平台首图，清晰展示商品主体和核心外观。", "1:1", 4, facts, "干净白底或浅灰背景，商品居中，真实摄影质感，边缘清晰，可用于电商搜索列表。", CommerceDefaultNegativePrompt),
+            CreateCommercePlanNode("scene", "场景图", "展示目标人群的真实使用场景。", "4:3", 4, facts, "把商品放入符合目标人群的生活方式场景，保留产品比例和材质，光线自然，有明确购买想象。", CommerceDefaultNegativePrompt),
+            CreateCommercePlanNode("detail", "细节图", "放大材质、结构、工艺和关键卖点。", "1:1", 3, facts, "微距商品摄影，突出核心卖点、材质纹理、结构细节和使用触感，画面干净。", CommerceDefaultNegativePrompt),
+            CreateCommercePlanNode("compare", "对比图", "表达卖点、效果或规格差异。", "4:3", 2, facts, "采用克制的信息图构图，左右或上下对比，少量清晰标签，突出商品优势。", CommerceDefaultNegativePrompt),
+            CreateCommercePlanNode("size", "尺寸图", "说明尺寸、容量、包装规格或套装内容。", "1:1", 2, facts, "商品比例准确，加入简洁尺寸标注和规格信息，背景干净，信息层级清楚。", CommerceDefaultNegativePrompt),
+            CreateCommercePlanNode("aplus", "A+ 图", "用于详情页模块、品牌故事和卖点长图。", "3:4", 3, facts, "详情页模块式竖版视觉，包含商品主视觉、卖点区块和场景氛围，文字极少且清晰。", CommerceDefaultNegativePrompt),
+            CreateCommercePlanNode("package", "包装图", "展示包装、套装、赠品和到手内容。", "1:1", 2, facts, "商品与包装盒、套装配件整齐陈列，真实棚拍，适合平台详情页和活动页。", CommerceDefaultNegativePrompt),
         ];
+    }
+
+    private static int FindCommerceNodeIndex(CommerceImagePlan plan, string? nodeId) =>
+        string.IsNullOrWhiteSpace(nodeId)
+            ? -1
+            : plan.Nodes.FindIndex(node => string.Equals(node.Id, nodeId, StringComparison.Ordinal));
+
+    private static CommerceImageNode CopyCommercePlanNodeDraft(CommerceImageNode source)
+    {
+        return new CommerceImageNode
+        {
+            Type = source.Type,
+            Title = source.Title,
+            Goal = source.Goal,
+            AspectRatio = source.AspectRatio,
+            Scene = source.Scene,
+            Composition = source.Composition,
+            KeyMessage = source.KeyMessage,
+            Prompt = source.Prompt,
+            NegativePrompt = source.NegativePrompt,
+            ReferenceRole = source.ReferenceRole,
+            Enabled = source.Enabled,
+            PlannedCount = source.PlannedCount,
+        };
+    }
+
+    private static string NextCommerceNodeTitle(CommerceImagePlan plan, string baseTitle)
+    {
+        var normalizedBase = string.IsNullOrWhiteSpace(baseTitle) ? "自定义节点" : baseTitle.Trim();
+        var existing = plan.Nodes
+            .Select(node => node.Title)
+            .Where(title => !string.IsNullOrWhiteSpace(title))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!existing.Contains(normalizedBase))
+        {
+            return normalizedBase;
+        }
+
+        for (var index = 2; index <= 99; index++)
+        {
+            var candidate = $"{normalizedBase} {index}";
+            if (!existing.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return $"{normalizedBase} {DateTimeOffset.Now:HHmmss}";
     }
 
     private static CommerceImageNode CreateCommercePlanNode(
