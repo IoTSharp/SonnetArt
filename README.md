@@ -29,7 +29,8 @@ SonnetArt is a browser application backed by the bundled ASP.NET Core 10 SonnetH
 
 - `/api/openai/*` proxies to `SonnetArt:AiUpstreamUrl` for an OpenAI-compatible image model gateway.
 - `/api/sonnet/*` proxies to `SonnetArt:AccountUpstreamUrl` and rewrites requests under `/api/v1` for account and sub2api-compatible APIs.
-- `/api/studio/snapshot` persists the studio snapshot through the configured SonnetDB server connection.
+- `/api/studio/snapshot` persists studio state in PostgreSQL.
+- `/api/prompt-library` queries the PostgreSQL-backed prompt catalog seeded by SonnetHost.
 
 Authentication, quota enforcement, metering, billing, and model routing should live in the upstream gateway. SonnetArt focuses on the open creative interface and browser experience.
 
@@ -58,17 +59,13 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    environment:
+      ConnectionStrings__SonnetArt: "Host=sub2api-postgres;Port=5432;Database=sub2api;Username=sub2api;Password=change-me;SSL Mode=Disable"
     volumes:
       - ./appsettings.Production.json:/app/appsettings.Production.json:ro
     depends_on:
       - sub2api
-      - sonnetdb
-
-  sonnetdb:
-    image: iotsharp/sonnetdb:latest
-    restart: unless-stopped
-    expose:
-      - "5080"
+      - sub2api-postgres
 
   sub2api:
     image: weishaw/sub2api:latest
@@ -81,6 +78,16 @@ services:
       BASE_URL: https://your-domain.example.com
     volumes:
       - ./data/sub2api:/app/data
+
+  sub2api-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sub2api
+      POSTGRES_USER: sub2api
+      POSTGRES_PASSWORD: change-me
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
 ```
 
 Create `appsettings.Production.json` next to the compose file:
@@ -91,7 +98,6 @@ Create `appsettings.Production.json` next to the compose file:
     "PublicOrigin": ":8080",
     "AiUpstreamUrl": "http://sub2api:8080/",
     "AccountUpstreamUrl": "http://sub2api:8080/",
-    "SonnetDbConnection": "Data Source=sonnetdb+http://sonnetdb:5080/sonnetart;Token=change-me-sonnetdb-token",
     "PromptImageWarmup": true
   }
 }
@@ -104,7 +110,7 @@ Create `appsettings.Production.json` next to the compose file:
 | `SonnetArt:PublicOrigin` | Yes | SonnetHost listen address. Containers usually keep `:8080`. |
 | `SonnetArt:AiUpstreamUrl` | Yes | OpenAI-compatible image model gateway URL. |
 | `SonnetArt:AccountUpstreamUrl` | Yes | Account / sub2api-compatible API URL. |
-| `SonnetArt:SonnetDbConnection` | Yes | SonnetDB server connection string for server-side studio persistence. |
+| `ConnectionStrings:SonnetArt` | Yes | PostgreSQL connection string for studio state and the prompt catalog. It can point to the same database used by sub2api. |
 | `SonnetArt:PromptImageWarmup` | No | Whether to prefetch remote prompt-library images. |
 
 ## 🔗 Embedded Mode

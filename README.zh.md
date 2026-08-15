@@ -29,7 +29,8 @@ SonnetArt 是由 ASP.NET Core 10 SonnetHost 承载的浏览器应用。使用 Do
 
 - `/api/openai/*` 转发到 `SonnetArt:AiUpstreamUrl`，用于访问 OpenAI 兼容的图像模型网关。
 - `/api/sonnet/*` 转发到 `SonnetArt:AccountUpstreamUrl`，并重写到 `/api/v1`，用于访问账号和 sub2api 兼容接口。
-- `/api/studio/snapshot` 通过配置的 SonnetDB 服务器连接保存工作台快照。
+- `/api/studio/snapshot` 把工作台状态保存到 PostgreSQL。
+- `/api/prompt-library` 查询由 SonnetHost 灌种到 PostgreSQL 的提示词目录。
 
 认证、配额、计量、模型路由等能力应由上游网关实现，SonnetArt 只负责开放的创作界面和浏览器端体验。
 
@@ -58,17 +59,13 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    environment:
+      ConnectionStrings__SonnetArt: "Host=sub2api-postgres;Port=5432;Database=sub2api;Username=sub2api;Password=change-me;SSL Mode=Disable"
     volumes:
       - ./appsettings.Production.json:/app/appsettings.Production.json:ro
     depends_on:
       - sub2api
-      - sonnetdb
-
-  sonnetdb:
-    image: iotsharp/sonnetdb:latest
-    restart: unless-stopped
-    expose:
-      - "5080"
+      - sub2api-postgres
 
   sub2api:
     image: weishaw/sub2api:latest
@@ -81,6 +78,16 @@ services:
       BASE_URL: https://your-domain.example.com
     volumes:
       - ./data/sub2api:/app/data
+
+  sub2api-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sub2api
+      POSTGRES_USER: sub2api
+      POSTGRES_PASSWORD: change-me
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
 ```
 
 在 compose 文件同级创建 `appsettings.Production.json`：
@@ -91,7 +98,6 @@ services:
     "PublicOrigin": ":8080",
     "AiUpstreamUrl": "http://sub2api:8080/",
     "AccountUpstreamUrl": "http://sub2api:8080/",
-    "SonnetDbConnection": "Data Source=sonnetdb+http://sonnetdb:5080/sonnetart;Token=change-me-sonnetdb-token",
     "PromptImageWarmup": true
   }
 }
@@ -104,7 +110,7 @@ services:
 | `SonnetArt:PublicOrigin` | 是 | SonnetHost 监听地址。容器内通常保持 `:8080`。 |
 | `SonnetArt:AiUpstreamUrl` | 是 | OpenAI 兼容图像模型网关地址。 |
 | `SonnetArt:AccountUpstreamUrl` | 是 | 账号 / sub2api 兼容 API 地址。 |
-| `SonnetArt:SonnetDbConnection` | 是 | SonnetDB 服务器连接字符串，用于服务端工作台持久化。 |
+| `ConnectionStrings:SonnetArt` | 是 | 工作台状态与提示词目录使用的 PostgreSQL 连接字符串，可直接指向 sub2api 使用的同一数据库。 |
 | `SonnetArt:PromptImageWarmup` | 否 | 是否预热提示词库远程图片缓存。 |
 
 ## 🔗 嵌入模式

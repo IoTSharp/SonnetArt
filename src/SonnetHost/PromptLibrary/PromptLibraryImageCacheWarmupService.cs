@@ -1,24 +1,30 @@
 using System.Security.Cryptography;
-using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using SonnetArt.Models;
 using SonnetHost.Configuration;
+using SonnetHost.StudioStorage;
 
 namespace SonnetHost.PromptLibrary;
 
 public sealed class PromptLibraryImageCacheWarmupService : BackgroundService
 {
     private const int MaxConcurrency = 4;
-    private readonly IServiceProvider _services;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IWebHostEnvironment _environment;
     private readonly IOptions<SonnetArtHostOptions> _options;
     private readonly ILogger<PromptLibraryImageCacheWarmupService> _logger;
 
     public PromptLibraryImageCacheWarmupService(
-        IServiceProvider services,
+        IServiceScopeFactory scopeFactory,
+        IHttpClientFactory httpClientFactory,
+        IWebHostEnvironment environment,
         IOptions<SonnetArtHostOptions> options,
         ILogger<PromptLibraryImageCacheWarmupService> logger)
     {
-        _services = services;
+        _scopeFactory = scopeFactory;
+        _httpClientFactory = httpClientFactory;
+        _environment = environment;
         _options = options;
         _logger = logger;
     }
@@ -45,15 +51,14 @@ public sealed class PromptLibraryImageCacheWarmupService : BackgroundService
 
     private async Task WarmupAsync(CancellationToken cancellationToken)
     {
-        var promptLibraryPath = ResolvePromptLibraryPath();
-        if (!File.Exists(promptLibraryPath))
-        {
-            return;
-        }
-
-        var items = await ReadPromptLibraryAsync(promptLibraryPath, cancellationToken);
-        var urls = items
-            .SelectMany(item => item.PreviewImages)
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<SonnetArtDbContext>();
+        var previewImages = await db.PromptLibraryItems
+            .AsNoTracking()
+            .Select(item => item.PreviewImages)
+            .ToListAsync(cancellationToken);
+        var urls = previewImages
+            .SelectMany(images => images)
             .Select(value => Uri.TryCreate(value, UriKind.Absolute, out var uri) ? uri : null)
             .Where(uri => uri?.Scheme is "http" or "https")
             .Select(uri => uri!)
@@ -89,8 +94,7 @@ public sealed class PromptLibraryImageCacheWarmupService : BackgroundService
 
             Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
             var tempPath = cachePath + ".tmp";
-            var clientFactory = _services.GetRequiredService<IHttpClientFactory>();
-            var client = clientFactory.CreateClient("prompt-library-images");
+            var client = _httpClientFactory.CreateClient("prompt-library-images");
             using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!response.IsSuccessStatusCode ||
                 response.Content.Headers.ContentType?.MediaType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) != true)
@@ -116,38 +120,8 @@ public sealed class PromptLibraryImageCacheWarmupService : BackgroundService
         }
     }
 
-    private static async Task<List<PromptLibraryItem>> ReadPromptLibraryAsync(string path, CancellationToken cancellationToken)
-    {
-        await using var stream = File.OpenRead(path);
-        return await JsonSerializer.DeserializeAsync<List<PromptLibraryItem>>(
-            stream,
-            cancellationToken: cancellationToken) ?? [];
-    }
-
-    private string ResolvePromptLibraryPath()
-    {
-        var environment = _services.GetRequiredService<IWebHostEnvironment>();
-        var publishedPath = Path.Combine(environment.ContentRootPath, "wwwroot", "data", "prompt-library.json");
-        if (File.Exists(publishedPath))
-        {
-            return publishedPath;
-        }
-
-        return Path.GetFullPath(Path.Combine(
-            environment.ContentRootPath,
-            "..",
-            "SonnetArt",
-            "bin",
-            environment.EnvironmentName.Equals("Development", StringComparison.OrdinalIgnoreCase) ? "Debug" : "Release",
-            "net10.0",
-            "wwwroot",
-            "data",
-            "prompt-library.json"));
-    }
-
     private string ResolveRemoteImageCachePath(Uri uri)
     {
-        var environment = _services.GetRequiredService<IWebHostEnvironment>();
         var extension = Path.GetExtension(uri.AbsolutePath);
         if (string.IsNullOrWhiteSpace(extension) || extension.Length > 8)
         {
@@ -155,6 +129,6 @@ public sealed class PromptLibraryImageCacheWarmupService : BackgroundService
         }
 
         var key = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(uri.AbsoluteUri))).ToLowerInvariant();
-        return Path.Combine(environment.ContentRootPath, "data", "prompt-library-images", key + extension);
+        return Path.Combine(_environment.ContentRootPath, "data", "prompt-library-images", key + extension);
     }
 }

@@ -10,8 +10,6 @@ public sealed class SonnetArtHostOptions
 
     public string? AccountUpstreamUrl { get; set; }
 
-    public string? SonnetDbConnection { get; set; }
-
     public bool PromptImageWarmup { get; set; } = true;
 
     public Uri ResolveAiUpstreamUri() => ResolveAbsoluteUri(AiUpstreamUrl, nameof(AiUpstreamUrl));
@@ -26,17 +24,11 @@ public sealed class SonnetArtHostOptions
             : origin;
     }
 
-    public string ResolveSonnetDbConnectionString()
-    {
-        return RequireConfigured(SonnetDbConnection, nameof(SonnetDbConnection));
-    }
-
     public void Validate()
     {
         _ = ResolveListenUrl();
         _ = ResolveAiUpstreamUri();
         _ = ResolveAccountUpstreamUri();
-        _ = ResolveSonnetDbConnectionString();
     }
 
     private static Uri ResolveAbsoluteUri(string? value, string optionName)

@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
-using SonnetDB.EntityFrameworkCore.Extensions;
 using SonnetHost.Configuration;
 using SonnetHost.PromptLibrary;
 using SonnetHost.Proxy;
@@ -17,6 +16,12 @@ var sonnetArtConfiguration = builder.Configuration.GetRequiredSection(SonnetArtH
 var hostOptions = sonnetArtConfiguration
     .Get<SonnetArtHostOptions>() ?? new SonnetArtHostOptions();
 hostOptions.Validate();
+var databaseConnection = builder.Configuration.GetConnectionString("SonnetArt");
+if (string.IsNullOrWhiteSpace(databaseConnection))
+{
+    throw new InvalidOperationException("ConnectionStrings:SonnetArt must be configured.");
+}
+
 builder.Services
     .AddOptions<SonnetArtHostOptions>()
     .Bind(sonnetArtConfiguration)
@@ -77,9 +82,10 @@ builder.Services.AddHttpClient("sonnet-storage-auth", client =>
 })
 .ConfigurePrimaryHttpMessageHandler(CreateProxyHandler);
 builder.Services.AddDbContext<SonnetArtDbContext>(options =>
-    options.UseSonnetDB(hostOptions.ResolveSonnetDbConnectionString()));
+    options.UseNpgsql(databaseConnection, postgres => postgres.EnableRetryOnFailure()));
 builder.Services.AddScoped<StudioSnapshotStore>();
 builder.Services.AddScoped<SonnetArtIdentityResolver>();
+builder.Services.AddScoped<PromptLibraryStore>();
 builder.Services.AddSingleton<SonnetArtStorageSchemaInitializer>();
 builder.Services.AddHostedService<PromptLibraryImageCacheWarmupService>();
 
